@@ -82,6 +82,30 @@ final class WorktreeStore {
 
     private typealias FileIdentity = WorktreeProcessQuiescer.DirectoryIdentity
 
+    struct CleanupDependencies: Sendable {
+        let worktreeRegistration: @Sendable (
+            String,
+            String,
+            WorkspaceContext,
+            TimeInterval
+        ) async throws -> GitWorktreeRegistration
+        let pathExists: @Sendable (String, WorkspaceContext, TimeInterval) async throws -> Bool
+
+        static let live = CleanupDependencies(
+            worktreeRegistration: { repoPath, path, context, timeout in
+                try await GitWorktreeService.shared.worktreeRegistration(
+                    repoPath: repoPath,
+                    path: path,
+                    context: context,
+                    timeout: timeout
+                )
+            },
+            pathExists: { path, context, timeout in
+                try await context.fileOps.exists(at: path, timeout: timeout)
+            }
+        )
+    }
+
     private enum CleanupPlan {
         case registered
         case staleManaged(projectID: UUID, identity: FileIdentity)
@@ -100,6 +124,7 @@ final class WorktreeStore {
         let context: WorkspaceContext
         let force: Bool
         let deadline: OperationDeadline
+        let dependencies: CleanupDependencies
     }
 
     private(set) var worktrees: [UUID: [Worktree]] = [:]
@@ -658,6 +683,7 @@ final class WorktreeStore {
         teardownGlobalConfigURL: URL = WorktreeConfig.globalConfigURL(),
         force: Bool = true,
         timeout: TimeInterval = GitWorktreeService.defaultWorktreeRemovalTimeout,
+        dependencies: CleanupDependencies = .live,
         teardownEmit: @Sendable @escaping (WorktreeTeardownOutputLine) -> Void = { _ in }
     ) async throws -> WorktreeCleanupResult {
         guard worktree.canBeRemoved else {
@@ -673,7 +699,8 @@ final class WorktreeStore {
             repoPath: repoPath,
             context: context,
             force: force,
-            deadline: deadline
+            deadline: deadline,
+            dependencies: dependencies
         )
         let plan = try await cleanupPlan(for: operation)
         if case let .finished(result) = plan {
@@ -730,23 +757,26 @@ final class WorktreeStore {
         if !operation.context.isRemote, !isUnambiguousLocalPath(worktree.path) {
             throw GitWorktreeService.GitWorktreeError.notRegistered
         }
-        let isRegistered = try await GitWorktreeService.shared.isWorktreeRegistered(
-            repoPath: operation.repoPath,
-            path: worktree.path,
-            context: operation.context,
-            timeout: operation.deadline.remaining()
+        let registration = try await operation.dependencies.worktreeRegistration(
+            operation.repoPath,
+            worktree.path,
+            operation.context,
+            operation.deadline.remaining()
         )
-        guard !isRegistered else { return .registered }
-        guard !operation.context.isRemote else {
-            throw GitWorktreeService.GitWorktreeError.notRegistered
-        }
-        guard try await operation.context.fileOps.exists(
-            at: worktree.path,
-            timeout: operation.deadline.remaining()
+        guard !registration.isRegistered else { return .registered }
+        guard try await operation.dependencies.pathExists(
+            registration.path,
+            operation.context,
+            operation.deadline.remaining()
         )
         else {
-            await removeParentDirectoryIfEmpty(for: worktree.path)
+            if !operation.context.isRemote {
+                await removeParentDirectoryIfEmpty(for: worktree.path)
+            }
             return .finished(.removed)
+        }
+        guard !operation.context.isRemote else {
+            throw GitWorktreeService.GitWorktreeError.notRegistered
         }
         guard operation.force,
               let projectID = operation.projectID,
@@ -768,18 +798,19 @@ final class WorktreeStore {
         identity: FileIdentity
     ) async throws -> StaleRemovalResult {
         let worktree = operation.worktree
-        let isNowRegistered = try await GitWorktreeService.shared.isWorktreeRegistered(
-            repoPath: operation.repoPath,
-            path: worktree.path,
-            context: operation.context,
-            timeout: operation.deadline.remaining()
-        )
+        let isNowRegistered = try await operation.dependencies.worktreeRegistration(
+            operation.repoPath,
+            worktree.path,
+            operation.context,
+            operation.deadline.remaining()
+        ).isRegistered
         guard !isNowRegistered else {
             throw GitWorktreeService.GitWorktreeError.commandFailed("Worktree changed during removal.")
         }
-        guard try await operation.context.fileOps.exists(
-            at: worktree.path,
-            timeout: operation.deadline.remaining()
+        guard try await operation.dependencies.pathExists(
+            worktree.path,
+            operation.context,
+            operation.deadline.remaining()
         )
         else {
             await removeParentDirectoryIfEmpty(for: worktree.path)
@@ -802,12 +833,12 @@ final class WorktreeStore {
         else {
             return .finished(.preservedUnverifiedDirectory)
         }
-        let isRegisteredAfterQuiescing = try await GitWorktreeService.shared.isWorktreeRegistered(
-            repoPath: operation.repoPath,
-            path: worktree.path,
-            context: operation.context,
-            timeout: operation.deadline.remaining()
-        )
+        let isRegisteredAfterQuiescing = try await operation.dependencies.worktreeRegistration(
+            operation.repoPath,
+            worktree.path,
+            operation.context,
+            operation.deadline.remaining()
+        ).isRegistered
         guard !isRegisteredAfterQuiescing else {
             throw GitWorktreeService.GitWorktreeError.commandFailed("Worktree changed during removal.")
         }

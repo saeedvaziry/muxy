@@ -651,6 +651,59 @@ struct GitWorktreeServiceRemoveTests {
         #expect(result == .removed)
     }
 
+    @Test("cleanup forgets an unregistered remote worktree that is already absent")
+    func cleanupSucceedsForAbsentRemoteWorktree() async throws {
+        let resolvedPath = "/home/user/repos/removed-remote-worktree"
+        let worktree = Worktree(
+            name: "removed-remote-worktree",
+            path: "../removed-remote-worktree",
+            branch: "removed-remote-worktree",
+            source: .external,
+            isPrimary: false
+        )
+        let dependencies = WorktreeStore.CleanupDependencies(
+            worktreeRegistration: { _, _, _, _ in
+                GitWorktreeRegistration(path: resolvedPath, isRegistered: false)
+            },
+            pathExists: { path, _, _ in path != resolvedPath }
+        )
+
+        let result = try await WorktreeStore.cleanupOnDisk(
+            worktree: worktree,
+            repoPath: "/home/user/repos/main",
+            context: .ssh(SSHDestination(host: "example.test")),
+            dependencies: dependencies
+        )
+
+        #expect(result == .removed)
+    }
+
+    @Test("cleanup preserves an unregistered remote directory that still exists")
+    func cleanupPreservesExistingUnregisteredRemoteDirectory() async {
+        let worktree = Worktree(
+            name: "unregistered-remote-worktree",
+            path: "/home/user/repos/unregistered-remote-worktree",
+            branch: "unregistered-remote-worktree",
+            source: .external,
+            isPrimary: false
+        )
+        let dependencies = WorktreeStore.CleanupDependencies(
+            worktreeRegistration: { _, path, _, _ in
+                GitWorktreeRegistration(path: path, isRegistered: false)
+            },
+            pathExists: { _, _, _ in true }
+        )
+
+        await #expect(throws: GitWorktreeService.GitWorktreeError.self) {
+            try await WorktreeStore.cleanupOnDisk(
+                worktree: worktree,
+                repoPath: "/home/user/repos/main",
+                context: .ssh(SSHDestination(host: "example.test")),
+                dependencies: dependencies
+            )
+        }
+    }
+
     @Test("force cleanup retains a reused managed checkout without Git ownership")
     func forceCleanupRetainsReusedManagedCheckout() async throws {
         let repo = try TempGitRepo()

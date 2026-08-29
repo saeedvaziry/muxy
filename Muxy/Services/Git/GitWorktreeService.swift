@@ -25,6 +25,11 @@ struct GitWorktreeRecord: Hashable {
     }
 }
 
+struct GitWorktreeRegistration: Equatable, Sendable {
+    let path: String
+    let isRegistered: Bool
+}
+
 protocol GitWorktreeListing {
     func listWorktrees(repoPath: String) async throws -> [GitWorktreeRecord]
 }
@@ -364,6 +369,20 @@ actor GitWorktreeService: GitWorktreeListing {
         context: WorkspaceContext = .local,
         timeout: TimeInterval = defaultWorktreeRemovalTimeout
     ) async throws -> Bool {
+        try await worktreeRegistration(
+            repoPath: repoPath,
+            path: path,
+            context: context,
+            timeout: timeout
+        ).isRegistered
+    }
+
+    func worktreeRegistration(
+        repoPath: String,
+        path: String,
+        context: WorkspaceContext = .local,
+        timeout: TimeInterval = defaultWorktreeRemovalTimeout
+    ) async throws -> GitWorktreeRegistration {
         let deadline = OperationDeadline(timeout: timeout)
         let records = try await listWorktrees(
             repoPath: repoPath,
@@ -376,11 +395,14 @@ actor GitWorktreeService: GitWorktreeListing {
             context: context,
             timeout: deadline.remaining()
         )
-        guard let resolvedPath = resolutions.first?.path else { return false }
+        guard let resolvedPath = resolutions.first?.path else {
+            throw WorkspacePathResolverError.invalidOutput
+        }
         let target = Self.canonicalPath(resolvedPath, context: context)
-        return resolutions.dropFirst().contains {
+        let isRegistered = resolutions.dropFirst().contains {
             Self.canonicalPath($0.path, context: context) == target
         }
+        return GitWorktreeRegistration(path: resolvedPath, isRegistered: isRegistered)
     }
 
     private func pruneWorktrees(repoPath: String, context: WorkspaceContext, timeout: TimeInterval) async throws {
