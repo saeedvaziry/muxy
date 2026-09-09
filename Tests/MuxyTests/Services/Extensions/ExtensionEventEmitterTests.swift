@@ -13,10 +13,9 @@ struct ExtensionEventEmitterTests {
     func tabSnapshotCarriesContext() {
         let appState = makeAppState()
         let area = firstArea(in: appState)
-        area.createTab()
+        let tabID = area.createTab()
 
         let snapshot = ExtensionEventEmitter.snapshot(from: appState)
-        let tabID = area.tabs.last!.id
         let context = snapshot.tabContext[tabID]
 
         #expect(context?.kind == "terminal")
@@ -43,7 +42,7 @@ struct ExtensionEventEmitterTests {
     func updatedTabContextDetectsChange() {
         let appState = makeAppState()
         let area = firstArea(in: appState)
-        area.createTab()
+        _ = area.createTab()
         let pane = area.tabs.last!.content.pane!
 
         let before = ExtensionEventEmitter.snapshot(from: appState)
@@ -82,11 +81,10 @@ struct ExtensionEventEmitterTests {
     func closedTabContextFromBeforeSnapshot() {
         let appState = makeAppState()
         let area = firstArea(in: appState)
-        area.createTab()
-        let tabID = area.tabs.last!.id
+        let tabID = area.createTab()
 
         let before = ExtensionEventEmitter.snapshot(from: appState)
-        area.closeTab(tabID)
+        _ = area.closeTab(tabID)
         let after = ExtensionEventEmitter.snapshot(from: appState)
 
         #expect(before.tabContext[tabID] != nil)

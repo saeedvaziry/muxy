@@ -17,6 +17,11 @@ if [[ -n "$LOCAL_XCFRAMEWORK_TAR" ]]; then
     LOCAL_XCFRAMEWORK_TAR="$(cd "$(dirname "$LOCAL_XCFRAMEWORK_TAR")" && pwd)/$(basename "$LOCAL_XCFRAMEWORK_TAR")"
 fi
 
+GHOSTTY_ARCHIVE="$XCFRAMEWORK_DIR/macos-arm64_x86_64/ghostty-internal.a"
+if [[ -f "$GHOSTTY_ARCHIVE" ]]; then
+    "$SCRIPT_DIR/normalize-ghostty-archive.swift" "$GHOSTTY_ARCHIVE"
+fi
+
 if [[ -d "$XCFRAMEWORK_DIR" && -d "$RESOURCES_DIR/shell-integration" && -d "$TERMINFO_DIR" ]]; then
     echo "==> GhosttyKit.xcframework and resources already present, skipping download"
     echo "    To re-download, remove: rm -rf GhosttyKit.xcframework Muxy/Resources/ghostty Muxy/Resources/terminfo"
@@ -61,6 +66,7 @@ if [[ ! -d "$XCFRAMEWORK_DIR" ]]; then
 
     echo "==> Syncing ghostty.h from xcframework"
     cp "$XCFRAMEWORK_DIR/macos-arm64_x86_64/Headers/ghostty.h" "$PROJECT_ROOT/GhosttyKit/ghostty.h"
+    "$SCRIPT_DIR/normalize-ghostty-archive.swift" "$GHOSTTY_ARCHIVE"
 fi
 
 if [[ "$NEEDS_RESOURCES_DOWNLOAD" == "true" ]]; then

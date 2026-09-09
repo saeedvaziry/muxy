@@ -31,12 +31,27 @@ private actor BackupOperationLock {
 }
 
 struct BackupService {
+    typealias SettingsSynchronizer = @MainActor @Sendable () -> SettingsJSONStore.SyncResult
+    typealias SettingsApplier = @MainActor @Sendable (URL) throws -> Void
+
     private static let operationLock = BackupOperationLock()
 
     let baseDirectory: URL
+    private let settingsSynchronizer: SettingsSynchronizer
+    private let settingsApplier: SettingsApplier
 
-    init(baseDirectory: URL = MuxyFileStorage.appSupportDirectory()) {
+    init(
+        baseDirectory: URL = MuxyFileStorage.appSupportDirectory(),
+        settingsSynchronizer: @escaping SettingsSynchronizer = {
+            SettingsJSONStore.syncUserSettingsFileWithCurrentSettings()
+        },
+        settingsApplier: @escaping SettingsApplier = {
+            try SettingsJSONStore.applyUserSettingsFile(from: $0)
+        }
+    ) {
         self.baseDirectory = baseDirectory
+        self.settingsSynchronizer = settingsSynchronizer
+        self.settingsApplier = settingsApplier
     }
 
     func export(to archiveURL: URL, appVersion: String, createdAt: Date) async throws {
@@ -76,7 +91,7 @@ struct BackupService {
     @MainActor
     func exportCurrent(to archiveURL: URL, createdAt: Date = Date()) async throws {
         try await BackupService.operationLock.withLock {
-            switch SettingsJSONStore.syncUserSettingsFileWithCurrentSettings() {
+            switch settingsSynchronizer() {
             case .updated,
                  .unchanged:
                 break
@@ -92,9 +107,7 @@ struct BackupService {
         try await BackupService.operationLock.withLock {
             let backupDirectory = try await importBackup(from: archiveURL, backupStamp: backupStamp())
             do {
-                try SettingsJSONStore.applyUserSettingsFile(
-                    from: baseDirectory.appendingPathComponent(SettingsCatalog.userSettingsFilename)
-                )
+                try settingsApplier(baseDirectory.appendingPathComponent(SettingsCatalog.userSettingsFilename))
             } catch {
                 try await restoreFromPreImport(backupDirectory: backupDirectory)
                 throw error

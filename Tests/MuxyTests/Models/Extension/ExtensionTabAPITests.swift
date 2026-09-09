@@ -287,7 +287,7 @@ struct TerminalTabExtensionRoundTrip {
     }
 
     @Test("restored extensionWebView tab reconstructs the ExtensionTabState")
-    func restoreReconstructsState() {
+    func restoreReconstructsState() throws {
         let snapshot = TerminalTabSnapshot(
             kind: .extensionWebView,
             customTitle: nil,
@@ -300,11 +300,11 @@ struct TerminalTabExtensionRoundTrip {
             extensionTabData: .object(["prNumber": .number(7)])
         )
         let tab = TerminalTab(restoring: snapshot)
-        let restored = try? #require(tab.content.extensionState)
-        #expect(restored?.extensionID == "pr-tools")
-        #expect(restored?.tabTypeID == "pr-viewer")
-        #expect(restored?.defaultTitle == "PR Viewer")
-        #expect(restored?.data == .object(["prNumber": .number(7)]))
+        let restored = try #require(tab.content.extensionState)
+        #expect(restored.extensionID == "pr-tools")
+        #expect(restored.tabTypeID == "pr-viewer")
+        #expect(restored.defaultTitle == "PR Viewer")
+        #expect(restored.data == .object(["prNumber": .number(7)]))
     }
 
     @Test("restored extensionWebView falls back to terminal when fields missing")

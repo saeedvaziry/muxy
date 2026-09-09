@@ -439,7 +439,8 @@ final class MemoryDiagnostics: NSObject {
             if let pthread = pthread_from_mach_thread_np(thread),
                pthread_getname_np(pthread, &nameBuf, nameBuf.count) == 0
             {
-                let name = String(cString: nameBuf)
+                let bytes = nameBuf.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+                let name = String(bytes: bytes, encoding: .utf8) ?? ""
                 let key = name.isEmpty ? "(unnamed)" : name
                 histogram[key, default: 0] += 1
             } else {

@@ -13,7 +13,7 @@ struct TerminalOfflineStoreTests {
     @Test("worktree turns offline only once every terminal pane is offline")
     func worktreeOfflineWaitsForEveryPane() throws {
         let context = makeContext()
-        let panes = try #require(paneStates(in: context.appState))
+        let panes = paneStates(in: context.appState)
         #expect(panes.count == 2)
 
         panes[0].isOffline = true
@@ -30,7 +30,7 @@ struct TerminalOfflineStoreTests {
     @Test("worktree turns online again once any terminal pane wakes")
     func worktreeOnlineWhenAnyPaneWakes() throws {
         let context = makeContext()
-        let panes = try #require(paneStates(in: context.appState))
+        let panes = paneStates(in: context.appState)
 
         for pane in panes {
             pane.isOffline = true
@@ -50,7 +50,7 @@ struct TerminalOfflineStoreTests {
     func offlineEventUsesWorktreeRoot() throws {
         let panePath = "\(projectPath)/packages/app"
         let context = makeContext(additionalPanePath: panePath)
-        let panes = try #require(paneStates(in: context.appState))
+        let panes = paneStates(in: context.appState)
         let nestedPane = try #require(panes.first(where: { $0.projectPath == panePath }))
 
         for pane in panes where pane.id != nestedPane.id {
@@ -68,7 +68,7 @@ struct TerminalOfflineStoreTests {
     @Test("closing an online pane leaves an offline worktree behind")
     func closingOnlinePaneReportsOfflineWorktree() throws {
         let context = makeContext()
-        let panes = try #require(paneStates(in: context.appState))
+        let panes = paneStates(in: context.appState)
 
         panes[1].isOffline = true
         context.store.update(paneID: panes[1].id, appState: context.appState)
@@ -81,7 +81,7 @@ struct TerminalOfflineStoreTests {
     @Test("closing the last pane of an offline worktree reports it online")
     func closingLastPaneReportsWorktreeOnline() throws {
         let context = makeContext()
-        let panes = try #require(paneStates(in: context.appState))
+        let panes = paneStates(in: context.appState)
 
         for pane in panes {
             pane.isOffline = true
@@ -101,7 +101,7 @@ struct TerminalOfflineStoreTests {
     @Test("closing the last pane of an online worktree stays silent")
     func closingLastPaneOfOnlineWorktreeStaysSilent() throws {
         let context = makeContext()
-        let panes = try #require(paneStates(in: context.appState))
+        let panes = paneStates(in: context.appState)
 
         context.store.update(paneID: panes[0].id, appState: context.appState)
         for pane in panes {
@@ -115,7 +115,7 @@ struct TerminalOfflineStoreTests {
     @Test("removing mixed-state panes together uses the final worktree state")
     func removingMixedStatePanesTogetherUsesFinalState() throws {
         let context = makeContext()
-        let panes = try #require(paneStates(in: context.appState))
+        let panes = paneStates(in: context.appState)
 
         panes[1].isOffline = true
         context.store.update(paneID: panes[1].id, appState: context.appState)
@@ -128,7 +128,7 @@ struct TerminalOfflineStoreTests {
     @Test("a pane created in an offline worktree reports it online")
     func createdPaneReportsWorktreeOnline() throws {
         let context = makeContext()
-        let panes = try #require(paneStates(in: context.appState))
+        let panes = paneStates(in: context.appState)
 
         for pane in panes {
             pane.isOffline = true
@@ -156,7 +156,7 @@ struct TerminalOfflineStoreTests {
     @Test("a pane created twice is registered once")
     func createdPaneIsRegisteredOnce() throws {
         let context = makeContext()
-        let panes = try #require(paneStates(in: context.appState))
+        let panes = paneStates(in: context.appState)
         let extraPaneID = UUID()
 
         for pane in panes {
@@ -208,9 +208,9 @@ struct TerminalOfflineStoreTests {
         appState.workspaceRoots[worktreeKey] = .tabArea(area)
         appState.focusedAreaID[worktreeKey] = area.id
         if let additionalPanePath {
-            area.createTab(inDirectory: additionalPanePath)
+            _ = area.createTab(inDirectory: additionalPanePath)
         } else {
-            area.createTab()
+            _ = area.createTab()
         }
 
         let recorder = EmissionRecorder()

@@ -8,12 +8,12 @@ import Testing
 @Suite("MuxyExtensionHost event parsing")
 struct ExtensionHostBridgeTests {
     @Test("parses an event line with payload key/value pairs")
-    func parsesEventWithPayload() {
+    func parsesEventWithPayload() throws {
         let parsed = HostBridge.parseEvent("event|pane.created|paneID=abc|title=hello")
-        let result = try? #require(parsed)
-        #expect(result?.name == "pane.created")
-        #expect(result?.payload["paneID"] == "abc")
-        #expect(result?.payload["title"] == "hello")
+        let result = try #require(parsed)
+        #expect(result.name == "pane.created")
+        #expect(result.payload["paneID"] == "abc")
+        #expect(result.payload["title"] == "hello")
     }
 
     @Test("parses an event line without payload")
@@ -46,12 +46,12 @@ struct ExtensionHostBridgeTests {
     }
 
     @Test("parses an invoke line with call id, action and payload")
-    func parsesInvoke() {
+    func parsesInvoke() throws {
         let parsed = HostBridge.parseInvoke("invoke|call-1|forecast|eyJjaXR5IjoiQmVybGluIn0=")
-        let result = try? #require(parsed)
-        #expect(result?.callID == "call-1")
-        #expect(result?.action == "forecast")
-        #expect(result?.payload == "eyJjaXR5IjoiQmVybGluIn0=")
+        let result = try #require(parsed)
+        #expect(result.callID == "call-1")
+        #expect(result.action == "forecast")
+        #expect(result.payload == "eyJjaXR5IjoiQmVybGluIn0=")
     }
 
     @Test("rejects malformed invoke lines")
@@ -62,11 +62,11 @@ struct ExtensionHostBridgeTests {
     }
 
     @Test("keeps the payload intact when it would otherwise contain delimiters")
-    func parsesInvokePreservesPayload() {
+    func parsesInvokePreservesPayload() throws {
         let parsed = HostBridge.parseInvoke("invoke|call-1|forecast|a|b|c")
-        let result = try? #require(parsed)
-        #expect(result?.action == "forecast")
-        #expect(result?.payload == "a|b|c")
+        let result = try #require(parsed)
+        #expect(result.action == "forecast")
+        #expect(result.payload == "a|b|c")
     }
 }
 

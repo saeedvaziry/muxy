@@ -489,7 +489,6 @@ final class WorktreeStore {
                 GitWorktreeService.canonicalPath($0.path, context: context)
             }
             let recordKeys = Set(resolvedRecordKeys)
-
             if let primaryIndex = list.firstIndex(where: \.isPrimary) {
                 list[primaryIndex].path = project.path
                 list[primaryIndex].name = project.name

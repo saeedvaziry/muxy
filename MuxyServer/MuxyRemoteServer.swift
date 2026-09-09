@@ -263,7 +263,7 @@ public final class MuxyRemoteServer: @unchecked Sendable {
 
     func _testingMarkAuthenticated(_ id: UUID) {
         queue.sync {
-            authenticatedClients.insert(id)
+            _ = authenticatedClients.insert(id)
         }
     }
 

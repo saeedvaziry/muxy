@@ -4,10 +4,10 @@ import Testing
 @testable import Muxy
 
 @MainActor
-@Suite("ProjectPickerWorkflow")
+@Suite("ProjectPickerWorkflow", .timeLimit(.minutes(1)))
 struct ProjectPickerWorkflowTests {
     @Test("new input applies only latest directory snapshot")
-    func latestDirectorySnapshotWins() async {
+    func latestDirectorySnapshotWins() async throws {
         let loader = ProjectPickerWorkflowTestDirectoryLoader()
         let workflow = ProjectPickerWorkflow(
             defaultDisplayPath: "~/",
@@ -19,16 +19,16 @@ struct ProjectPickerWorkflowTests {
         )
 
         _ = workflow.setInput("~/First")
-        await waitUntil { await loader.hasRequest(for: "~/First") }
+        try #require(await loader.waitForRequest("~/First"))
 
         _ = workflow.setInput("~/Second")
-        await waitUntil { await loader.hasRequest(for: "~/Second") }
+        try #require(await loader.waitForRequest("~/Second"))
 
         await loader.resolve(
             input: "~/Second",
             snapshot: ProjectPickerDirectorySnapshot(rows: ["Second"], readFailed: false)
         )
-        await waitUntil { workflow.session.rows.map(\.name) == ["Second"] }
+        try #require(await waitUntil { workflow.session.rows.map(\.name) == ["Second"] })
 
         await loader.resolve(
             input: "~/First",
@@ -40,7 +40,7 @@ struct ProjectPickerWorkflowTests {
     }
 
     @Test("loading message appears only while reload is active")
-    func loadingMessagePolicy() async {
+    func loadingMessagePolicy() async throws {
         let loader = ProjectPickerWorkflowTestDirectoryLoader()
         let slowWorkflow = ProjectPickerWorkflow(
             defaultDisplayPath: "~/Slow",
@@ -52,8 +52,8 @@ struct ProjectPickerWorkflowTests {
         )
 
         _ = slowWorkflow.setInput("~/Slow")
-        await waitUntil { await loader.hasRequest(for: "~/Slow") }
-        await waitUntil { slowWorkflow.session.directoryLoadState.showsMessage }
+        try #require(await loader.waitForRequest("~/Slow"))
+        try #require(await waitUntil { slowWorkflow.session.directoryLoadState.showsMessage })
         #expect(slowWorkflow.session.directoryLoadState == .loading(showsMessage: true))
 
         let fastWorkflow = ProjectPickerWorkflow(
@@ -66,14 +66,14 @@ struct ProjectPickerWorkflowTests {
         )
 
         _ = fastWorkflow.setInput("~/Fast")
-        await waitUntil { fastWorkflow.session.directoryLoadState == .loaded }
+        try #require(await waitUntil { fastWorkflow.session.directoryLoadState == .loaded })
         try? await Task.sleep(for: .milliseconds(80))
 
         #expect(fastWorkflow.session.directoryLoadState == .loaded)
     }
 
     @Test("folder search applies only the latest query and confirms the selected absolute path")
-    func latestFolderSearchWins() async {
+    func latestFolderSearchWins() async throws {
         let loader = ProjectPickerWorkflowTestFolderSearchLoader()
         let workflow = ProjectPickerWorkflow(
             defaultDisplayPath: "~/Projects/",
@@ -91,15 +91,15 @@ struct ProjectPickerWorkflowTests {
         )
 
         _ = workflow.setInput("mu")
-        await waitUntil { await loader.hasRequest(for: "mu") }
+        try #require(await loader.waitForRequest("mu"))
         _ = workflow.setInput("muxy")
-        await waitUntil { await loader.hasRequest(for: "muxy") }
+        try #require(await loader.waitForRequest("muxy"))
 
         await loader.resolve(
             query: "muxy",
             snapshot: ProjectPickerFolderSearchSnapshot(results: [secondResult], readFailed: false)
         )
-        await waitUntil { workflow.session.searchResults == [secondResult] }
+        try #require(await waitUntil { workflow.session.searchResults == [secondResult] })
 
         await loader.resolve(
             query: "mu",
@@ -172,30 +172,57 @@ struct ProjectPickerWorkflowTests {
     }
 
     private func waitUntil(
-        timeout: Duration = .seconds(1),
+        timeout: Duration = .seconds(5),
         condition: @escaping () async -> Bool
-    ) async {
+    ) async -> Bool {
         let start = ContinuousClock.now
         while ContinuousClock.now - start < timeout {
-            if await condition() { return }
+            if await condition() { return true }
             try? await Task.sleep(for: .milliseconds(5))
         }
+        return false
     }
 }
 
 private actor ProjectPickerWorkflowTestDirectoryLoader {
     private var requests: Set<String> = []
+    private var requestWaiters: [String: [UUID: CheckedContinuation<Bool, Never>]] = [:]
     private var continuations: [String: CheckedContinuation<ProjectPickerDirectorySnapshot, Never>] = [:]
 
     func load(_ pathState: ProjectPickerPathState) async -> ProjectPickerDirectorySnapshot {
         requests.insert(pathState.input)
+        if let waiters = requestWaiters.removeValue(forKey: pathState.input) {
+            for continuation in waiters.values {
+                continuation.resume(returning: true)
+            }
+        }
         return await withCheckedContinuation { continuation in
             continuations[pathState.input] = continuation
         }
     }
 
-    func hasRequest(for input: String) -> Bool {
-        requests.contains(input)
+    func waitForRequest(_ input: String, timeout: Duration = .seconds(5)) async -> Bool {
+        guard !requests.contains(input) else { return true }
+        let waiterID = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                requestWaiters[input, default: [:]][waiterID] = continuation
+                Task { [weak self] in
+                    try? await Task.sleep(for: timeout)
+                    await self?.resumeRequestWaiter(input: input, id: waiterID, result: false)
+                }
+            }
+        } onCancel: {
+            Task { await self.resumeRequestWaiter(input: input, id: waiterID, result: false) }
+        }
+    }
+
+    private func resumeRequestWaiter(input: String, id: UUID, result: Bool) {
+        guard let continuation = requestWaiters[input]?.removeValue(forKey: id) else { return }
+        if requestWaiters[input]?.isEmpty == true {
+            requestWaiters[input] = nil
+        }
+        continuation.resume(returning: result)
     }
 
     func resolve(input: String, snapshot: ProjectPickerDirectorySnapshot) {
@@ -205,17 +232,43 @@ private actor ProjectPickerWorkflowTestDirectoryLoader {
 
 private actor ProjectPickerWorkflowTestFolderSearchLoader {
     private var requests: Set<String> = []
+    private var requestWaiters: [String: [UUID: CheckedContinuation<Bool, Never>]] = [:]
     private var continuations: [String: CheckedContinuation<ProjectPickerFolderSearchSnapshot, Never>] = [:]
 
     func load(_ query: String) async -> ProjectPickerFolderSearchSnapshot {
         requests.insert(query)
+        if let waiters = requestWaiters.removeValue(forKey: query) {
+            for continuation in waiters.values {
+                continuation.resume(returning: true)
+            }
+        }
         return await withCheckedContinuation { continuation in
             continuations[query] = continuation
         }
     }
 
-    func hasRequest(for query: String) -> Bool {
-        requests.contains(query)
+    func waitForRequest(_ query: String, timeout: Duration = .seconds(5)) async -> Bool {
+        guard !requests.contains(query) else { return true }
+        let waiterID = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                requestWaiters[query, default: [:]][waiterID] = continuation
+                Task { [weak self] in
+                    try? await Task.sleep(for: timeout)
+                    await self?.resumeRequestWaiter(query: query, id: waiterID, result: false)
+                }
+            }
+        } onCancel: {
+            Task { await self.resumeRequestWaiter(query: query, id: waiterID, result: false) }
+        }
+    }
+
+    private func resumeRequestWaiter(query: String, id: UUID, result: Bool) {
+        guard let continuation = requestWaiters[query]?.removeValue(forKey: id) else { return }
+        if requestWaiters[query]?.isEmpty == true {
+            requestWaiters[query] = nil
+        }
+        continuation.resume(returning: result)
     }
 
     func resolve(query: String, snapshot: ProjectPickerFolderSearchSnapshot) {

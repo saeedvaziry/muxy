@@ -89,7 +89,8 @@ enum MobilePairingService {
             var raw = storage.sin_addr
             var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
             guard inet_ntop(AF_INET, &raw, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil else { continue }
-            let ip = String(cString: buffer)
+            let bytes = buffer.prefix { $0 != 0 }.map(UInt8.init(bitPattern:))
+            guard let ip = String(bytes: bytes, encoding: .utf8) else { continue }
             if isTailscaleAddress(ip) {
                 return ip
             }

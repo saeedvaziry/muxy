@@ -76,10 +76,10 @@ jobs:
             spm-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Build tests
-        run: swift build --build-tests --quiet
+        run: swift build --build-tests --quiet -Xswiftc -warnings-as-errors -Xlinker -fatal_warnings
 
       - name: Test
-        run: swift test --quiet
+        run: scripts/run-tests-isolated.sh swift test --quiet -Xswiftc -warnings-as-errors -Xlinker -fatal_warnings
 
       - name: Save SPM cache
         if: always() && steps.spm-cache.outputs.cache-hit != 'true'

@@ -1,7 +1,10 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import OSLog
 import WebKit
+
+private let browserAutomationLogger = Logger(subsystem: "app.muxy", category: "BrowserAutomation")
 
 struct BrowserCookieInfo: Equatable {
     let name: String
@@ -523,33 +526,19 @@ extension MuxyAPI.Browser {
     }
 
     private static func allCookies(in store: WKHTTPCookieStore) async -> [HTTPCookie] {
-        for _ in 0 ..< cookieFetchAttempts {
-            if let cookies = await allCookiesAttempt(in: store) {
-                return cookies
-            }
-        }
-        return await allCookiesAttempt(in: store) ?? []
+        await allCookiesAttempt(in: store) ?? []
     }
 
     private static func allCookiesAttempt(in store: WKHTTPCookieStore) async -> [HTTPCookie]? {
-        let box = CookieResultBox()
-        store.getAllCookies { cookies in
-            Task { @MainActor in box.deliver(cookies) }
+        await cookieFetchCoordinator.value(for: store, timeout: .milliseconds(cookieAttemptTimeoutMs)) {
+            await store.allCookies()
         }
-        let deadline = ContinuousClock.now + .milliseconds(cookieAttemptTimeoutMs)
-        while ContinuousClock.now < deadline {
-            if let cookies = box.take() {
-                return cookies
-            }
-            do { try await Task.sleep(for: .milliseconds(20)) } catch { break }
-        }
-        return nil
     }
 
     private static let maxStringLength = 5_000_000
     private static let maxWaitMilliseconds = 60000
-    private static let cookieFetchAttempts = 3
     private static let cookieAttemptTimeoutMs = 800
+    private static let cookieFetchCoordinator = CookieFetchCoordinator<[HTTPCookie]>()
 
     private struct ResolvedWebView {
         let state: BrowserTabState
@@ -779,18 +768,129 @@ func jsString(_ value: String) -> String {
 }
 
 @MainActor
-private final class CookieResultBox {
-    private var cookies: [HTTPCookie]?
-    private var delivered = false
+final class CookieFetchCoordinator<Value: Sendable> {
+    private var states: [ObjectIdentifier: State] = [:]
+    private let maximumActiveRequests = 2
 
-    func deliver(_ value: [HTTPCookie]) {
-        guard !delivered else { return }
-        delivered = true
-        cookies = value
+    func value(
+        for owner: AnyObject,
+        timeout: Duration,
+        operation: @escaping @MainActor () async -> Value
+    ) async -> Value? {
+        removeReleasedOwners()
+        let identifier = ObjectIdentifier(owner)
+        let state = states[identifier] ?? State(owner: owner)
+        states[identifier] = state
+        if let request = state.current {
+            return await request.value()
+        }
+        guard state.active.count < maximumActiveRequests else {
+            browserAutomationLogger.warning("Cookie request retry limit reached before WebKit returned data")
+            return nil
+        }
+        let request = Request()
+        state.current = request
+        state.active[request.id] = request
+        start(operation, for: identifier, request: request)
+        startExpiry(for: identifier, request: request, after: timeout)
+        return await request.value()
     }
 
-    func take() -> [HTTPCookie]? {
-        cookies
+    var requestCount: Int {
+        states.values.reduce(0) { $0 + $1.active.count }
+    }
+
+    var waiterCount: Int {
+        states.values.reduce(0) { total, state in
+            total + state.active.values.reduce(0) { $0 + $1.waiterCount }
+        }
+    }
+
+    private func start(
+        _ operation: @escaping @MainActor () async -> Value,
+        for identifier: ObjectIdentifier,
+        request: Request
+    ) {
+        Task { [weak self, weak request] in
+            let value = await operation()
+            self?.complete(value, for: identifier, request: request)
+        }
+    }
+
+    private func startExpiry(for identifier: ObjectIdentifier, request: Request, after timeout: Duration) {
+        Task { [weak self, weak request] in
+            try? await Task.sleep(for: timeout)
+            self?.expire(for: identifier, request: request)
+        }
+    }
+
+    private func complete(_ value: Value, for identifier: ObjectIdentifier, request: Request?) {
+        guard let request, let state = states[identifier], state.active.removeValue(forKey: request.id) != nil else {
+            return
+        }
+        if state.current === request {
+            state.current = nil
+            request.complete(with: value)
+        }
+        removeStateIfIdle(state, for: identifier)
+    }
+
+    private func expire(for identifier: ObjectIdentifier, request: Request?) {
+        guard let request, let state = states[identifier], state.current === request else { return }
+        state.current = nil
+        request.complete(with: nil)
+        browserAutomationLogger.warning("Cookie request expired before WebKit returned data")
+    }
+
+    private func removeStateIfIdle(_ state: State, for identifier: ObjectIdentifier) {
+        guard state.active.isEmpty else { return }
+        states[identifier] = nil
+    }
+
+    private func removeReleasedOwners() {
+        states = states.filter { $0.value.owner != nil || $0.value.active.isEmpty == false }
+    }
+
+    @MainActor
+    private final class State {
+        weak var owner: AnyObject?
+        var current: Request?
+        var active: [UUID: Request] = [:]
+
+        init(owner: AnyObject) {
+            self.owner = owner
+        }
+    }
+
+    @MainActor
+    private final class Request {
+        let id = UUID()
+        private var result: Value?
+        private var isComplete = false
+        private var continuations: [UUID: CheckedContinuation<Value?, Never>] = [:]
+
+        var waiterCount: Int {
+            continuations.count
+        }
+
+        func value() async -> Value? {
+            guard !isComplete else { return result }
+            let identifier = UUID()
+            return await withCheckedContinuation { continuation in
+                continuations[identifier] = continuation
+            }
+        }
+
+        func complete(with result: Value?) {
+            guard !isComplete else { return }
+            isComplete = true
+            self.result = result
+            let pending = continuations.values
+            continuations.removeAll()
+            for continuation in pending {
+                continuation.resume(returning: result)
+            }
+        }
     }
 }
 

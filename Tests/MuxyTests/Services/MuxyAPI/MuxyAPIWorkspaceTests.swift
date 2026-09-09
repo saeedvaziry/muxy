@@ -61,8 +61,8 @@ struct MuxyAPIWorkspaceRoutingTests {
             workspaceContextSink: InMemoryWorkspaceContextSink()
         )
         let group = store.addRemoteWorkspace(name: "Remote", deviceID: device.id)
-        store.addRemoteProject(name: "api", path: "/srv/api", toGroup: group.id)
-        store.addRemoteProject(name: "web", path: "/srv/web", toGroup: group.id)
+        _ = store.addRemoteProject(name: "api", path: "/srv/api", toGroup: group.id)
+        _ = store.addRemoteProject(name: "web", path: "/srv/web", toGroup: group.id)
 
         let result = MuxyAPI.Workspaces.list(projectGroupStore: store)
 
@@ -84,7 +84,7 @@ struct MuxyAPIWorkspaceRoutingTests {
     func createEmptyNameDefaults() {
         let store = makeStore()
 
-        MuxyAPI.Workspaces.create(name: "   ", projectGroupStore: store)
+        _ = MuxyAPI.Workspaces.create(name: "   ", projectGroupStore: store)
 
         #expect(store.groups.first?.name == "New Workspace")
     }
