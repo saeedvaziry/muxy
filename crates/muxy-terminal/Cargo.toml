@@ -1,26 +1,16 @@
 [package]
 name = "muxy-terminal"
+description = "Terminal core boundary"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-
-[dependencies]
-muxy-core.workspace = true
-unicode-segmentation.workspace = true
-thiserror.workspace = true
-
-[target.'cfg(target_os = "macos")'.dependencies]
-ghostty-host.workspace = true
-async-channel.workspace = true
-block2.workspace = true
-objc2.workspace = true
-objc2-foundation.workspace = true
-objc2-app-kit.workspace = true
-objc2-core-foundation.workspace = true
-objc2-core-text.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+libghostty-vt = "=0.2.1"

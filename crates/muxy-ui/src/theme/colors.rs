@@ -27,18 +27,18 @@ pub struct Theme {
     pub diff_hunk: Hsla,
 }
 
-const FALLBACK_BACKGROUND: u32 = 0x19171f;
-const FALLBACK_FOREGROUND: u32 = 0xc9c2d9;
-const FALLBACK_ACCENT: u32 = 0xc370d3;
+const FALLBACK_BACKGROUND: u32 = 0x19_17_1f;
+const FALLBACK_FOREGROUND: u32 = 0xc9_c2_d9;
+const FALLBACK_ACCENT: u32 = 0xc3_70_d3;
 
 impl Theme {
     pub fn from_scheme(theme: &ColorScheme) -> Self {
         let bg = theme.background.unwrap_or(rgb(FALLBACK_BACKGROUND));
         let fg = theme.foreground.unwrap_or(rgb(FALLBACK_FOREGROUND));
         let accent = theme.palette_color(4).unwrap_or(rgb(FALLBACK_ACCENT));
-        let warning = theme.palette_color(3).unwrap_or(rgb(0xe0af68));
-        let danger = theme.palette_color(1).unwrap_or(rgb(0xec4899));
-        let diff_add = theme.palette_color(2).unwrap_or(rgb(0x22c55e));
+        let warning = theme.palette_color(3).unwrap_or(rgb(0xe0_af_68));
+        let danger = theme.palette_color(1).unwrap_or(rgb(0xec_48_99));
+        let diff_add = theme.palette_color(2).unwrap_or(rgb(0x22_c5_5e));
         let diff_hunk = theme.palette_color(6).unwrap_or(accent);
 
         Self {
@@ -92,8 +92,8 @@ fn blend(top: Hsla, bottom: Hsla) -> Hsla {
 
 pub fn contrasting_foreground(color: Rgba) -> Rgba {
     if luminance(color) > 0.6 {
-        rgb(0x000000)
+        rgb(0x00_00_00)
     } else {
-        rgb(0xffffff)
+        rgb(0xff_ff_ff)
     }
 }

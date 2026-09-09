@@ -1,0 +1,21 @@
+[package]
+name = "muxy-client"
+description = "App-side server client boundary"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+muxy-protocol = { path = "../muxy-protocol" }
+muxy-transport = { path = "../muxy-transport" }
+muxy-wire = { path = "../muxy-wire" }
+
+[dev-dependencies]
+muxy-server-core = { path = "../muxy-server-core" }

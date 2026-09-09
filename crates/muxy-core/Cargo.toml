@@ -1,29 +1,16 @@
 [package]
 name = "muxy-core"
+description = "Shared foundation boundary"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-
-[dependencies]
-serde.workspace = true
-serde_json.workspace = true
-plist.workspace = true
-sha2.workspace = true
-thiserror.workspace = true
-unicode-segmentation.workspace = true
-image.workspace = true
-resvg.workspace = true
-log.workspace = true
-libc.workspace = true
-url.workspace = true
-percent-encoding.workspace = true
-
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2.workspace = true
-objc2-foundation.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

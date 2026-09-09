@@ -28,6 +28,7 @@ thread_local! {
     static TINTED: RefCell<HashMap<TintKey, Arc<RenderImage>>> = RefCell::new(HashMap::new());
 }
 
+#[derive(Debug)]
 pub struct Glyph {
     pub image: Arc<RenderImage>,
     pub width: Pixels,
@@ -46,8 +47,8 @@ pub fn tinted_symbol(
 ) -> Option<Glyph> {
     let key = MaskKey {
         symbol: symbol.clone(),
-        point_size: (f32::from(size) * 100.0).round() as u32,
-        scale: (scale * 100.0).round() as u32,
+        point_size: f32::from(size).to_bits(),
+        scale: scale.to_bits(),
     };
     let tint = TintKey {
         mask: key.clone(),
@@ -72,13 +73,12 @@ pub fn tinted_symbol(
             .clone()
     })?;
 
-    let image = match cached {
-        Some(image) => image,
-        None => {
-            let image = Arc::new(compose(&mask, color));
-            TINTED.with(|cache| cache.borrow_mut().insert(tint, image.clone()));
-            image
-        }
+    let image = if let Some(image) = cached {
+        image
+    } else {
+        let image = Arc::new(compose(&mask, color));
+        TINTED.with(|cache| cache.borrow_mut().insert(tint, image.clone()));
+        image
     };
 
     Some(Glyph {
@@ -90,23 +90,28 @@ pub fn tinted_symbol(
 
 fn compose(mask: &Mask, color: Hsla) -> RenderImage {
     let rgba: Rgba = color.into();
-    let (r, g, b) = (
-        (rgba.r * 255.0).round() as u32,
-        (rgba.g * 255.0).round() as u32,
-        (rgba.b * 255.0).round() as u32,
-    );
+    let (r, g, b) = (channel(rgba.r), channel(rgba.g), channel(rgba.b));
     let tint_alpha = rgba.a.clamp(0.0, 1.0);
 
     let mut buffer = RgbaImage::new(mask.width, mask.height);
     for (index, pixel) in buffer.pixels_mut().enumerate() {
-        let coverage = (mask.alpha[index] as f32 / 255.0) * tint_alpha;
-        pixel.0 = [b as u8, g as u8, r as u8, (coverage * 255.0).round() as u8];
+        let coverage = (f32::from(mask.alpha[index]) / 255.0) * tint_alpha;
+        pixel.0 = [b, g, r, channel(coverage)];
     }
     RenderImage::new([Frame::new(buffer)])
 }
 
 fn pack(color: Hsla) -> u32 {
     let rgba: Rgba = color.into();
-    let channel = |value: f32| ((value.clamp(0.0, 1.0) * 255.0).round() as u32) & 0xFF;
-    (channel(rgba.r) << 24) | (channel(rgba.g) << 16) | (channel(rgba.b) << 8) | channel(rgba.a)
+    u32::from_be_bytes([
+        channel(rgba.r),
+        channel(rgba.g),
+        channel(rgba.b),
+        channel(rgba.a),
+    ])
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn channel(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }

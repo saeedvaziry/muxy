@@ -5,6 +5,7 @@ use std::collections::HashMap;
 pub struct ColorScheme {
     pub background: Option<Rgba>,
     pub foreground: Option<Rgba>,
+    pub cursor_color: Option<Rgba>,
     pub palette: HashMap<usize, Rgba>,
 }
 
@@ -20,6 +21,7 @@ impl ColorScheme {
             match key {
                 "background" => theme.background = parse_hex(value),
                 "foreground" => theme.foreground = parse_hex(value),
+                "cursor-color" => theme.cursor_color = parse_hex(value),
                 "palette" => {
                     let Some((index, color)) = value.split_once('=') else {
                         continue;
@@ -48,10 +50,10 @@ pub fn parse_hex(value: &str) -> Option<Rgba> {
     u32::from_str_radix(value, 16).ok().map(rgb)
 }
 
-pub fn luminance(color: Rgba) -> f32 {
+pub(super) fn luminance(color: Rgba) -> f32 {
     0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b
 }
 
-pub fn with_alpha(color: Rgba, alpha: f32) -> Rgba {
+pub(super) fn with_alpha(color: Rgba, alpha: f32) -> Rgba {
     Rgba { a: alpha, ..color }
 }

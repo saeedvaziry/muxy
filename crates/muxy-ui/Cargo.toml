@@ -1,18 +1,28 @@
 [package]
 name = "muxy-ui"
+description = "Reusable GPUI components for Muxy"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
 
 [dependencies]
-gpui.workspace = true
-image.workspace = true
-unicode-segmentation.workspace = true
+muxy-core = { path = "../muxy-core" }
+gpui = { version = "=0.2.2", default-features = false }
+image = { version = "0.25", default-features = false }
+unicode-segmentation = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2.workspace = true
-objc2-foundation.workspace = true
-objc2-app-kit.workspace = true
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSString", "NSURL"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSGraphics", "NSGraphicsContext", "NSFontDescriptor", "objc2-core-foundation", "NSAlert", "NSOpenPanel", "NSPanel", "NSSavePanel", "NSApplication", "NSButton", "NSCell", "NSControl", "NSResponder", "NSView", "NSWindow", "NSScrollView", "NSScroller", "NSClipView", "NSEvent", "NSAppearance", "block2"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+gpui = { version = "=0.2.2", default-features = false, features = ["test-support"] }

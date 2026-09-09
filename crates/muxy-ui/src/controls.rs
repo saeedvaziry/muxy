@@ -14,13 +14,13 @@ use std::rc::Rc;
 pub const CONTROL_WIDTH: f32 = 210.0;
 pub const SLIDER_WIDTH: f32 = 220.0;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Style<'a> {
     pub theme: &'a Theme,
     pub metrics: &'a Metrics,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Choice {
     pub value: String,
     pub label: String,
@@ -138,7 +138,7 @@ pub fn toggle(
         .bg(if value { theme.accent } else { theme.surface })
         .border_1()
         .border_color(if value { theme.accent } else { theme.border })
-        .when(value, |element| element.justify_end())
+        .when(value, Styled::justify_end)
         .child(knob)
         .on_click(on_click)
         .into_any_element()
@@ -181,7 +181,7 @@ pub fn button(
 pub fn picker(
     style: Style,
     id: &str,
-    choices: Vec<Choice>,
+    choices: &[Choice],
     selected: &str,
     popover: Option<Entity<CommandPopover>>,
     on_toggle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -272,7 +272,7 @@ pub fn picker_trigger(
 pub fn segmented(
     style: Style,
     id: &str,
-    choices: Vec<Choice>,
+    choices: &[Choice],
     selected: &str,
     on_select: impl Fn(&SharedString, &mut Window, &mut App) + 'static,
 ) -> AnyElement {
@@ -290,7 +290,7 @@ pub fn segmented(
         .border_1()
         .border_color(theme.border);
 
-    for choice in &choices {
+    for choice in choices {
         let is_selected = choice.value == selected;
         let handler = handler.clone();
         let value = SharedString::from(choice.value.clone());
@@ -335,6 +335,7 @@ pub fn segmented(
     group.into_any_element()
 }
 
+#[derive(Debug)]
 pub struct Grab {
     pub bounds: Bounds<Pixels>,
     pub position: Point<Pixels>,
@@ -376,7 +377,7 @@ pub fn slider(
         .child(
             canvas(
                 move |bounds, _, _| recorder.set(Some(bounds)),
-                |_, _: (), _, _| {},
+                |_, (): (), _, _| {},
             )
             .absolute()
             .size_full(),

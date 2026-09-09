@@ -1,154 +1,87 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
-    "crates/ghostty-sys",
-    "crates/ghostty-host",
-    "crates/muxy",
     "crates/muxy-core",
-    "crates/muxy-extension-host",
-    "crates/muxy-proto",
+    "crates/muxy-protocol",
+    "crates/muxy-wire",
+    "crates/muxy-transport",
+    "crates/muxy-pty",
     "crates/muxy-terminal",
+    "crates/muxy-server-core",
+    "crates/muxy-server",
+    "crates/muxy-app-core",
+    "crates/muxy-settings",
+    "crates/muxy-client",
+    "crates/muxy-app",
     "crates/muxy-ui",
-    "crates/muxy-api",
 ]
+
+# Current boundary policy, not a permanent crate list. Structural changes update
+# this table and the affected crate-level documentation together.
+[workspace.metadata.architecture.allowed-dependencies]
+muxy-core = []
+muxy-protocol = ["muxy-core"]
+muxy-wire = ["muxy-protocol"]
+muxy-transport = []
+muxy-pty = []
+muxy-terminal = []
+muxy-server-core = [
+    "muxy-core",
+    "muxy-protocol",
+    "muxy-wire",
+    "muxy-transport",
+    "muxy-pty",
+    "muxy-terminal",
+]
+muxy-server = ["muxy-core", "muxy-protocol", "muxy-server-core", "muxy-transport", "muxy-wire"]
+muxy-settings = ["muxy-core"]
+muxy-app-core = ["muxy-core", "muxy-protocol", "muxy-settings"]
+muxy-client = ["muxy-core", "muxy-protocol", "muxy-wire", "muxy-transport"]
+muxy-app = ["muxy-core", "muxy-app-core", "muxy-client", "muxy-settings", "muxy-protocol", "muxy-ui"]
+muxy-ui = ["muxy-core"]
+
+[workspace.metadata.architecture.allowed-dev-dependencies]
+muxy-app = ["muxy-wire"]
+muxy-client = ["muxy-server-core"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.92"
+license = "MIT"
+repository = "https://github.com/saeedvaziry/muxy"
+authors = ["Saeed Vaziry"]
+publish = false
 
 [workspace.dependencies]
-ghostty-host = { path = "crates/ghostty-host" }
-ghostty-sys = { path = "crates/ghostty-sys" }
-muxy-api = { path = "crates/muxy-api" }
-muxy-core = { path = "crates/muxy-core" }
-muxy-proto = { path = "crates/muxy-proto" }
-muxy-terminal = { path = "crates/muxy-terminal" }
-muxy-ui = { path = "crates/muxy-ui" }
-gpui = "=0.2.2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-plist = "1"
-sha2 = "0.10"
-anyhow = "1"
-rust-embed = "8"
-image = "0.25"
-unicode-segmentation = "1"
-notify = "8"
-rfd = "0.15"
-resvg = "0.45"
-async-channel = "2"
-base64 = "0.22"
-bindgen = "0.71"
-block2 = "0.6"
-libc = "0.2"
-log = "0.4"
-raw-window-handle = "0.6"
-tempfile = "3"
-thiserror = "2"
-uuid = { version = "1", default-features = false, features = ["v4"] }
-time = { version = "0.3", features = ["formatting"] }
-url = "2"
-percent-encoding = "2"
-objc2 = "0.6"
-objc2-javascript-core = "0.3.2"
-objc2-web-kit = { version = "0.3.2", default-features = false, features = [
-    "std",
-    "block2",
-    "objc2-app-kit",
-    "objc2-core-foundation",
-    "WKContentWorld",
-    "WKNavigation",
-    "WKNavigationAction",
-    "WKNavigationDelegate",
-    "WKScriptMessage",
-    "WKScriptMessageHandlerWithReply",
-    "WKURLSchemeHandler",
-    "WKURLSchemeTask",
-    "WKUserContentController",
-    "WKUserScript",
-    "WKWebView",
-    "WKWebViewConfiguration",
-] }
-objc2-core-foundation = { version = "0.3", features = ["CFMachPort", "CFRunLoop"] }
-objc2-core-graphics = { version = "0.3", features = ["CGEvent", "CGEventTypes", "CGRemoteOperation"] }
-objc2-core-text = "0.3"
-objc2-quartz-core = { version = "0.3", features = [
-    "CALayer",
-    "CATransaction",
-    "objc2-core-foundation",
-] }
-objc2-foundation = { version = "0.3", features = [
-    "NSArray",
-    "NSData",
-    "NSError",
-    "NSJSONSerialization",
-    "NSGeometry",
-    "NSString",
-    "NSURL",
-    "NSURLRequest",
-    "NSURLResponse",
-    "NSURLError",
-    "NSValue",
-    "NSUserDefaults",
-    "NSDictionary",
-] }
-objc2-app-kit = { version = "0.3", features = [
-    "objc2-core-graphics",
-    "NSAccessibility",
-    "NSAccessibilityConstants",
-    "NSAccessibilityElement",
-    "NSAccessibilityProtocols",
-    "NSAnimation",
-    "NSApplication",
-    "NSDragging",
-    "NSEvent",
-    "NSImage",
-    "NSImageRep",
-    "NSBitmapImageRep",
-    "NSGraphics",
-    "NSGraphicsContext",
-    "NSColor",
-    "NSColorSpace",
-    "NSCell",
-    "NSClipView",
-    "NSControl",
-    "NSResponder",
-    "NSRunningApplication",
-    "NSScrollView",
-    "NSScroller",
-    "NSView",
-    "NSWindow",
-    "NSWorkspace",
-    "NSPasteboard",
-    "NSPasteboardItem",
-    "NSPanel",
-    "NSScreen",
-    "NSSound",
-] }
-objc2-user-notifications = { version = "0.3.2", default-features = false, features = [
-    "block2",
-    "NSString_UserNotifications",
-    "UNNotification",
-    "UNNotificationContent",
-    "UNNotificationRequest",
-    "UNNotificationResponse",
-    "UNNotificationSettings",
-    "UNUserNotificationCenter",
-] }
+serde_json = "1.0"
 
 [workspace.lints.rust]
-missing_unsafe_on_extern = "deny"
-unsafe_op_in_unsafe_fn = "deny"
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
 
 [workspace.lints.clippy]
-dbg_macro = "deny"
-missing_safety_doc = "allow"
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
 todo = "deny"
 unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
 
-[profile.dev]
-opt-level = 1
+[profile.release]
+lto = "thin"
+codegen-units = 4
+debug = 1
 
-[profile.dev.package."*"]
-opt-level = 2
+[profile.bench]
+inherits = "release"

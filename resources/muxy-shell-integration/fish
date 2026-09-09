@@ -1,3 +1,0 @@
-if set -q MUXY_DEVELOPMENT_CLI_BIN; and test -n "$MUXY_DEVELOPMENT_CLI_BIN"
-    fish_add_path --global --path --prepend "$MUXY_DEVELOPMENT_CLI_BIN"
-end

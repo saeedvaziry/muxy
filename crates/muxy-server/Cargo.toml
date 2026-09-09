@@ -1,0 +1,26 @@
+[package]
+name = "muxy-server"
+description = "The Muxy server executable"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+log = { version = "0.4", features = ["std"] }
+muxy-core = { path = "../muxy-core" }
+muxy-server-core = { path = "../muxy-server-core" }
+muxy-transport = { path = "../muxy-transport" }
+serde = { version = "1", features = ["derive"] }
+signal-hook = "0.4"
+toml = "1.1"
+
+[dev-dependencies]
+muxy-protocol = { path = "../muxy-protocol" }
+muxy-wire = { path = "../muxy-wire" }

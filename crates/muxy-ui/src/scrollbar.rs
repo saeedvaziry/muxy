@@ -108,6 +108,10 @@ impl ScrollbarRevealState {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::float_cmp,
+    reason = "These geometry cases use exactly representable values."
+)]
 mod tests {
     use super::*;
 
@@ -132,7 +136,8 @@ mod tests {
     }
 
     #[test]
-    fn length_geometry_tracks_offset_and_respects_minimum_thumb() {
+    fn length_geometry_tracks_offset_and_respects_minimum_thumb()
+    -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(
             ThumbGeometry::from_lengths(200.0, 50.0, 0.0, 100.0, 24.0),
             Some(ThumbGeometry {
@@ -149,10 +154,11 @@ mod tests {
         );
         assert_eq!(
             ThumbGeometry::from_lengths(1000.0, 10.0, 0.0, 100.0, 24.0)
-                .expect("geometry")
+                .ok_or("missing geometry")?
                 .length,
             24.0
         );
+        Ok(())
     }
 
     #[test]
@@ -179,6 +185,12 @@ mod tests {
 
         assert!(!reveal.extend_near_track(now, 50.0, 100.0, 8.0));
         assert!(reveal.extend_near_track(now, 90.0, 100.0, 8.0));
-        assert!(reveal.allows_hit(now + REVEAL_DURATION - Duration::from_millis(1)));
+        assert!(
+            reveal.allows_hit(
+                (now + REVEAL_DURATION)
+                    .checked_sub(Duration::from_millis(1))
+                    .unwrap()
+            )
+        );
     }
 }

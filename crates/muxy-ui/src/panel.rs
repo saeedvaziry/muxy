@@ -38,6 +38,7 @@ impl From<String> for PanelId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[must_use]
 pub enum PanelPosition {
     Right,
     Bottom,
@@ -53,6 +54,7 @@ impl PanelPosition {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[must_use]
 pub enum PanelMode {
     Pinned,
     Floating,
@@ -335,6 +337,7 @@ enum PanelActionContent {
     Element(AnyElement),
 }
 
+#[must_use]
 pub struct PanelAction {
     id: ElementId,
     label: SharedString,
@@ -411,6 +414,7 @@ impl PanelAction {
 }
 
 #[derive(IntoElement)]
+#[must_use]
 pub struct PanelChrome {
     title: SharedString,
     icon: Option<AnyElement>,
@@ -424,6 +428,10 @@ pub struct PanelChrome {
 }
 
 impl PanelChrome {
+    #[allow(
+        clippy::similar_names,
+        reason = "Move and mode are distinct named panel actions."
+    )]
     pub fn new(
         title: impl Into<SharedString>,
         icon: Option<AnyElement>,
@@ -502,19 +510,19 @@ impl RenderOnce for PanelChrome {
             .children(
                 self.trailing_actions
                     .into_iter()
-                    .map(|action| panel_action(action, &self.theme, &self.metrics, window)),
+                    .map(|action| panel_action(action, &self.theme, self.metrics, window)),
             )
             .children(
                 self.move_action
-                    .map(|action| panel_action(action, &self.theme, &self.metrics, window)),
+                    .map(|action| panel_action(action, &self.theme, self.metrics, window)),
             )
             .children(
                 self.mode_action
-                    .map(|action| panel_action(action, &self.theme, &self.metrics, window)),
+                    .map(|action| panel_action(action, &self.theme, self.metrics, window)),
             )
             .children(
                 self.close_action
-                    .map(|action| panel_action(action, &self.theme, &self.metrics, window)),
+                    .map(|action| panel_action(action, &self.theme, self.metrics, window)),
             )
     }
 }
@@ -522,7 +530,7 @@ impl RenderOnce for PanelChrome {
 fn panel_action(
     action: PanelAction,
     theme: &Theme,
-    metrics: &Metrics,
+    metrics: Metrics,
     window: &Window,
 ) -> AnyElement {
     let PanelAction {
@@ -582,11 +590,10 @@ fn panel_action(
             cx.stop_propagation();
         })
         .on_click(move |_, window, cx| click_handler(window, cx))
-        .on_key_down(move |event, window, cx| {
-            if event.keystroke.key == "enter" || event.keystroke.key == "space" {
-                key_handler(window, cx);
-                cx.stop_propagation();
-            }
+        .key_context("Button")
+        .on_action(move |_: &crate::components::ActivateButton, window, cx| {
+            key_handler(window, cx);
+            cx.stop_propagation();
         })
         .tooltip(move |_, cx| {
             cx.new(|_| {
@@ -647,7 +654,7 @@ fn panel_resize_listener(
 ) -> impl IntoElement {
     canvas(
         |_, _, _| (),
-        move |_, _, window, _| {
+        move |_, (), window, _| {
             let move_state = resize_state.clone();
             let move_handler = handler.clone();
             window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
@@ -767,7 +774,39 @@ impl RenderOnce for PanelFrame {
     }
 }
 
+impl std::fmt::Debug for PanelAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PanelAction")
+            .field("id", &self.id)
+            .field("label", &self.label)
+            .field("selected", &self.selected)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for PanelChrome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PanelChrome")
+            .field("title", &self.title)
+            .field("trailing_actions", &self.trailing_actions)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for PanelFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PanelFrame")
+            .field("placement", &self.placement)
+            .field("sizing", &self.sizing)
+            .finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
+#[allow(
+    clippy::float_cmp,
+    reason = "These geometry cases use exactly representable values."
+)]
 mod tests {
     use super::{
         PanelHost, PanelId, PanelLayout, PanelMode, PanelPlacement, PanelPosition, PanelResize,
@@ -776,12 +815,12 @@ mod tests {
     use gpui::Point;
 
     #[test]
-    fn one_slot_displaces_deterministically() {
+    fn one_slot_displaces_deterministically() -> Result<(), Box<dyn std::error::Error>> {
         let mut host = PanelHost::default();
         let first = PanelPlacement::new("first", PanelPosition::Right, PanelMode::Pinned);
         let second = PanelPlacement::new("second", PanelPosition::Right, PanelMode::Pinned);
         assert!(host.place(first.clone()).is_none());
-        let displacement = host.place(second.clone()).unwrap();
+        let displacement = host.place(second.clone()).ok_or("missing displacement")?;
         assert_eq!(displacement.displaced, first);
         assert_eq!(displacement.replacement, second.clone());
         assert_eq!(host.len(), 1);
@@ -792,6 +831,7 @@ mod tests {
             }),
             Some(&PanelId::from("second"))
         );
+        Ok(())
     }
 
     #[test]

@@ -1,6 +1,7 @@
 #[cfg(target_os = "macos")]
 mod raster;
 #[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
 mod sfsymbol;
 
 #[cfg(target_os = "macos")]

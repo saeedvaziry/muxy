@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub struct Symbol {
     pub name: &'static str,
     pub symbol: &'static str,

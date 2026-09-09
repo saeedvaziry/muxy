@@ -1,3 +1,11 @@
+use muxy_core::shortcuts::ShortcutId;
+
+gpui::actions!(button, [ActivateButton]);
+
+pub fn register_shortcuts(registry: &mut crate::shortcuts::Registry<'_>) {
+    registry.register(ShortcutId::ButtonActivate, &ActivateButton);
+}
+
 use crate::icon::Icon;
 use gpui::{
     App, AppContext, ClickEvent, Context, ElementId, FocusHandle, Hsla, InteractiveElement,
@@ -8,7 +16,8 @@ use gpui::{
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 type KeyHandler = Box<dyn Fn(&mut Window, &mut App) + 'static>;
 
-#[derive(IntoElement)]
+#[derive(IntoElement, Debug)]
+#[must_use]
 pub struct IconGlyph {
     icon: Icon,
     size: Pixels,
@@ -63,8 +72,7 @@ impl RenderOnce for IconGlyph {
 #[cfg(target_os = "macos")]
 fn natural_size(icon: Icon, size: Pixels, scale: f32) -> (Pixels, Pixels) {
     crate::icon::tinted(icon, size, gpui::black(), scale)
-        .map(|glyph| (glyph.width, glyph.height))
-        .unwrap_or((size, size))
+        .map_or((size, size), |glyph| (glyph.width, glyph.height))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -101,6 +109,7 @@ fn svg_layer(icon: Icon, size: Pixels, color: Hsla) -> gpui::Div {
 }
 
 #[derive(IntoElement)]
+#[must_use]
 pub struct IconButton {
     id: ElementId,
     icon: Icon,
@@ -213,12 +222,13 @@ impl RenderOnce for IconButton {
             button = button.on_click(move |event, window, cx| handler(event, window, cx));
         }
         if let Some(handler) = self.on_key {
-            button = button.on_key_down(move |event, window, cx| {
-                if event.keystroke.key == "enter" || event.keystroke.key == "space" {
-                    handler(window, cx);
-                    cx.stop_propagation();
-                }
-            });
+            button =
+                button
+                    .key_context("Button")
+                    .on_action(move |_: &ActivateButton, window, cx| {
+                        handler(window, cx);
+                        cx.stop_propagation();
+                    });
         }
         if let Some((text, background, foreground, border)) = self.tooltip {
             button = button.tooltip(move |_, cx| {
@@ -230,6 +240,7 @@ impl RenderOnce for IconButton {
     }
 }
 
+#[derive(Debug)]
 pub struct Tooltip {
     text: SharedString,
     background: Hsla,
@@ -271,7 +282,7 @@ impl Render for Tooltip {
     }
 }
 
-#[derive(IntoElement)]
+#[derive(IntoElement, Debug)]
 pub struct Separator {
     color: Hsla,
 }
@@ -288,7 +299,7 @@ impl RenderOnce for Separator {
     }
 }
 
-#[derive(IntoElement)]
+#[derive(IntoElement, Debug)]
 pub struct SymbolGlyph {
     symbol: SharedString,
     size: Pixels,
@@ -333,5 +344,16 @@ fn fallback_layer(symbol: &SharedString, size: Pixels, color: Hsla) -> gpui::Div
     match Icon::from_symbol(symbol) {
         Some(icon) => svg_layer(icon, size, color),
         None => div().flex_none().size(size),
+    }
+}
+
+impl std::fmt::Debug for IconButton {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IconButton")
+            .field("id", &self.id)
+            .field("icon", &self.icon)
+            .field("glyph_size", &self.glyph_size)
+            .field("box_size", &self.box_size)
+            .finish_non_exhaustive()
     }
 }

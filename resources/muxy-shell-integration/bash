@@ -1,3 +1,0 @@
-if [[ -n "${MUXY_DEVELOPMENT_CLI_BIN:-}" ]]; then
-  export PATH="$MUXY_DEVELOPMENT_CLI_BIN:$PATH"
-fi

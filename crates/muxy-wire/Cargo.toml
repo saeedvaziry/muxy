@@ -1,0 +1,18 @@
+[package]
+name = "muxy-wire"
+description = "Wire encoding boundary"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+muxy-protocol = { path = "../muxy-protocol" }
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+serde = "1"

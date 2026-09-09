@@ -1,2 +1,6 @@
 [env]
-MACOSX_DEPLOYMENT_TARGET = { value = "14.0", force = true }
+LIBGHOSTTY_VT_SYS_OPTIMIZE = "ReleaseFast"
+
+[alias]
+xcheck = "clippy --workspace --all-targets --all-features -- -D warnings"
+xtest = "test --workspace --all-features"

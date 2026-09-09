@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  LIBGHOSTTY_VT_SYS_OPTIMIZE: ReleaseFast
+
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          components: rustfmt, clippy
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --workspace --all-features
+      - run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings

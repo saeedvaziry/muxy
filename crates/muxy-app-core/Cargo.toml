@@ -1,0 +1,22 @@
+[package]
+name = "muxy-app-core"
+description = "App domain boundary"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+muxy-core = { path = "../muxy-core" }
+muxy-protocol = { path = "../muxy-protocol" }
+muxy-settings = { path = "../muxy-settings" }
+serde = { version = "1", features = ["derive"] }
+serde_json.workspace = true
+uuid = { version = "1", features = ["v4", "serde"] }
+unicode-segmentation = "1"

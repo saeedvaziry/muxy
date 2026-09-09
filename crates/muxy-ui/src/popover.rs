@@ -45,3 +45,12 @@ impl RenderOnce for PopoverSurface {
             .child(self.content)
     }
 }
+
+impl std::fmt::Debug for PopoverSurface {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PopoverSurface")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish_non_exhaustive()
+    }
+}

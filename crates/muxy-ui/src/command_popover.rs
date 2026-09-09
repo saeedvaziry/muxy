@@ -1,3 +1,5 @@
+use muxy_core::shortcuts::ShortcutId;
+
 use crate::components::IconGlyph;
 #[cfg(target_os = "macos")]
 use crate::components::SymbolGlyph;
@@ -8,8 +10,8 @@ use crate::theme::{Metrics, Theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    Hsla, InteractiveElement, IntoElement, KeyBinding, ListAlignment, ListOffset, ListState,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render, SharedString,
+    Hsla, InteractiveElement, IntoElement, ListAlignment, ListOffset, ListState, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window, actions, div, px,
 };
 use std::collections::HashMap;
@@ -31,22 +33,22 @@ actions!(
     ]
 );
 
-pub fn key_bindings() -> Vec<KeyBinding> {
-    let context = Some(KEY_CONTEXT);
-    vec![
-        KeyBinding::new("down", SelectNext, context),
-        KeyBinding::new("up", SelectPrevious, context),
-        KeyBinding::new("enter", Confirm, context),
-        KeyBinding::new("alt-enter", SecondaryConfirm, context),
-        KeyBinding::new("cmd-enter", SecondaryConfirm, context),
-        KeyBinding::new("tab", TabPressed, context),
-        KeyBinding::new("shift-tab", SelectPrevious, context),
-        KeyBinding::new("alt-backspace", NavigateBack, context),
-        KeyBinding::new("alt-left", NavigateBack, context),
-        KeyBinding::new("escape", Dismiss, context),
-        KeyBinding::new("ctrl-tab", NextTab, context),
-        KeyBinding::new("ctrl-shift-tab", PreviousTab, context),
-    ]
+pub fn register_shortcuts(registry: &mut crate::shortcuts::Registry<'_>) {
+    registry.register(ShortcutId::PopoverSelectNext, &SelectNext);
+    registry.register(ShortcutId::PopoverSelectPrevious, &SelectPrevious);
+    registry.register(ShortcutId::PopoverConfirm, &Confirm);
+    registry.register(ShortcutId::PopoverSecondaryConfirm, &SecondaryConfirm);
+    registry.register(ShortcutId::PopoverTabPressed, &TabPressed);
+    registry.register(ShortcutId::PopoverNavigateBack, &NavigateBack);
+    registry.register(ShortcutId::PopoverDismiss, &Dismiss);
+    registry.register(ShortcutId::PopoverNextTab, &NextTab);
+    registry.register(ShortcutId::PopoverPreviousTab, &PreviousTab);
+}
+
+pub fn key_bindings() -> Vec<gpui::KeyBinding> {
+    let mut registry = crate::shortcuts::Registry::new(&muxy_core::shortcuts::Defaults);
+    register_shortcuts(&mut registry);
+    registry.into_bindings()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -142,13 +144,17 @@ impl CommandPopoverLayout {
     }
 }
 
-fn input_style(density: CommandPopoverDensity, theme: &Theme, metrics: &Metrics) -> InputStyle {
+fn input_style(density: CommandPopoverDensity, theme: &Theme, metrics: Metrics) -> InputStyle {
     match density {
-        CommandPopoverDensity::Comfortable => InputStyle::field(theme, metrics),
-        CommandPopoverDensity::Compact => InputStyle::compact(theme, metrics),
+        CommandPopoverDensity::Comfortable => InputStyle::field(theme, &metrics),
+        CommandPopoverDensity::Compact => InputStyle::compact(theme, &metrics),
     }
 }
 
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "GPUI measures row heights with f32 coordinates."
+)]
 fn content_height(
     layout: CommandPopoverLayout,
     tab_count: usize,
@@ -302,6 +308,7 @@ pub enum CommandPopoverLeading {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[must_use]
 pub struct CommandPopoverAction {
     pub id: SharedString,
     pub label: SharedString,
@@ -369,6 +376,7 @@ impl CommandPopoverRow {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[must_use]
 pub enum CommandPopoverItem {
     Section(SharedString),
     Row(CommandPopoverRow),
@@ -451,6 +459,7 @@ struct CommandPopoverTabState {
 pub struct CommandPopoverState {
     tabs: Vec<SharedString>,
     active_tab: SharedString,
+    active: CommandPopoverTabState,
     tab_states: HashMap<SharedString, CommandPopoverTabState>,
 }
 
@@ -461,12 +470,14 @@ impl CommandPopoverState {
         let active_tab = tabs[0].clone();
         let tab_states = tabs
             .iter()
+            .filter(|tab| **tab != active_tab)
             .cloned()
             .map(|tab| (tab, CommandPopoverTabState::default()))
             .collect();
         Self {
             tabs,
             active_tab,
+            active: CommandPopoverTabState::default(),
             tab_states,
         }
     }
@@ -496,7 +507,11 @@ impl CommandPopoverState {
     }
 
     pub fn set_status(&mut self, status: CommandPopoverStatus) {
-        self.active_state_mut().status = status;
+        let state = self.active_state_mut();
+        state.status = status;
+        if state.status != CommandPopoverStatus::Ready {
+            state.inline_action = None;
+        }
     }
 
     pub fn set_query(&mut self, query: impl Into<String>) {
@@ -525,14 +540,28 @@ impl CommandPopoverState {
     }
 
     pub fn activate_tab(&mut self, tab: &str) -> Result<(), UnknownCommandPopoverTab> {
+        if self.active_tab.as_ref() == tab {
+            return Ok(());
+        }
         let Some(tab) = self.tabs.iter().find(|candidate| candidate.as_ref() == tab) else {
             return Err(UnknownCommandPopoverTab);
         };
+        let next = self
+            .tab_states
+            .remove(tab)
+            .ok_or(UnknownCommandPopoverTab)?;
+        self.tab_states.insert(
+            self.active_tab.clone(),
+            std::mem::replace(&mut self.active, next),
+        );
         self.active_tab = tab.clone();
         Ok(())
     }
 
     pub fn selected_row_id(&self) -> Option<&str> {
+        if *self.status() != CommandPopoverStatus::Ready {
+            return None;
+        }
         self.active_state().selected_id.as_ref().map(AsRef::as_ref)
     }
 
@@ -545,6 +574,9 @@ impl CommandPopoverState {
     }
 
     pub fn select_last(&mut self) {
+        if *self.status() != CommandPopoverStatus::Ready {
+            return;
+        }
         let selected = self
             .active_state()
             .items
@@ -556,10 +588,12 @@ impl CommandPopoverState {
     }
 
     pub fn select_row(&mut self, id: &str) -> Result<(), UnknownCommandPopoverRow> {
-        if !self.active_state().items.iter().any(|item| {
-            item.selectable_id()
-                .is_some_and(|candidate| candidate.as_ref() == id)
-        }) {
+        if *self.status() != CommandPopoverStatus::Ready
+            || !self.active_state().items.iter().any(|item| {
+                item.selectable_id()
+                    .is_some_and(|candidate| candidate.as_ref() == id)
+            })
+        {
             return Err(UnknownCommandPopoverRow);
         }
         self.active_state_mut().selected_id = Some(SharedString::from(id.to_owned()));
@@ -586,10 +620,8 @@ impl CommandPopoverState {
     }
 
     pub fn confirm(&self) -> Option<CommandPopoverSelection> {
-        self.active_state()
-            .selected_id
-            .clone()
-            .map(CommandPopoverSelection::new)
+        self.selected_row_id()
+            .map(|id| CommandPopoverSelection::new(id.to_owned()))
     }
 
     fn inline_action(&self) -> Option<(&str, &str)> {
@@ -600,14 +632,17 @@ impl CommandPopoverState {
     }
 
     fn active_state(&self) -> &CommandPopoverTabState {
-        self.tab_states.get(&self.active_tab).unwrap()
+        &self.active
     }
 
     fn active_state_mut(&mut self) -> &mut CommandPopoverTabState {
-        self.tab_states.get_mut(&self.active_tab).unwrap()
+        &mut self.active
     }
 
     fn move_selection(&mut self, delta: isize) {
+        if *self.status() != CommandPopoverStatus::Ready {
+            return;
+        }
         let selectable = self
             .active_state()
             .items
@@ -623,7 +658,11 @@ impl CommandPopoverState {
             .selected_row_id()
             .and_then(|selected| selectable.iter().position(|id| id.as_ref() == selected))
             .unwrap_or(if delta > 0 { selectable.len() - 1 } else { 0 });
-        let next = (current as isize + delta).rem_euclid(selectable.len() as isize) as usize;
+        let next = if delta > 0 {
+            (current + 1) % selectable.len()
+        } else {
+            (current + selectable.len() - 1) % selectable.len()
+        };
         self.active_state_mut().selected_id = Some(selectable[next].clone());
     }
 }
@@ -736,7 +775,7 @@ impl CommandPopover {
     ) -> Self {
         assert!(!config.tabs.is_empty());
         assert!(config.height.is_none() || config.max_height.is_none());
-        let style = input_style(config.density, &theme, &metrics);
+        let style = input_style(config.density, &theme, metrics);
         let input = cx.new(|cx| {
             TextInput::new(style, cx)
                 .with_key_context(text_input::BARE_CONTEXT)
@@ -803,8 +842,10 @@ impl CommandPopover {
     pub fn set_items(&mut self, items: Vec<CommandPopoverItem>, cx: &mut Context<Self>) {
         self.state.set_items(items);
         self.confirmation_message = None;
-        self.scroll.reset(self.state.item_count());
-        self.scroll_to_selection();
+        if self.detail.is_none() {
+            self.scroll.reset(self.state.item_count());
+            self.scroll_to_selection();
+        }
         cx.notify();
     }
 
@@ -843,9 +884,9 @@ impl CommandPopover {
     }
 
     pub fn set_appearance(&mut self, theme: Theme, metrics: Metrics, cx: &mut Context<Self>) {
-        self.theme = theme.clone();
+        let style = input_style(self.config.density, &theme, metrics);
+        self.theme = theme;
         self.metrics = metrics;
-        let style = input_style(self.config.density, &theme, &metrics);
         self.input
             .update(cx, |input, cx| input.set_style(style, cx));
         cx.notify();
@@ -862,6 +903,7 @@ impl CommandPopover {
             .map(|line| SharedString::from(line.to_owned()))
             .collect::<Vec<_>>();
         self.detail = Some((title.into(), lines));
+        self.focused = false;
         self.scroll
             .reset(self.detail.as_ref().map_or(0, |(_, lines)| lines.len()));
         cx.notify();
@@ -895,6 +937,8 @@ impl CommandPopover {
         cx: &mut Context<Self>,
     ) -> Result<(), UnknownCommandPopoverTab> {
         self.state.activate_tab(tab)?;
+        self.detail = None;
+        self.focused = false;
         let query = self.state.query().to_owned();
         self.input.update(cx, |input, cx| input.set_text(query, cx));
         cx.emit(CommandPopoverEvent::TabChanged(
@@ -907,6 +951,9 @@ impl CommandPopover {
     }
 
     fn move_selection(&mut self, direction: isize, cx: &mut Context<Self>) {
+        if self.detail.is_some() {
+            return;
+        }
         if direction > 0 {
             self.state.select_next();
         } else {
@@ -928,6 +975,9 @@ impl CommandPopover {
     }
 
     fn confirm(&mut self, _: &Confirm, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.accepts_submission() {
+            return;
+        }
         if let Some(selection) = self.state.confirm() {
             cx.emit(CommandPopoverEvent::Confirmed(selection));
         } else {
@@ -936,6 +986,9 @@ impl CommandPopover {
     }
 
     fn secondary_confirm(&mut self, _: &SecondaryConfirm, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.accepts_submission() {
+            return;
+        }
         if let Some(selection) = self.state.confirm() {
             cx.emit(CommandPopoverEvent::SecondaryConfirmed(selection));
         } else {
@@ -943,9 +996,11 @@ impl CommandPopover {
         }
     }
 
-    fn dismiss(&mut self, _: &Dismiss, _: &mut Window, cx: &mut Context<Self>) {
+    fn dismiss(&mut self, _: &Dismiss, window: &mut Window, cx: &mut Context<Self>) {
         if self.detail.take().is_some() {
             self.scroll.reset(self.state.item_count());
+            window.focus(&self.input.focus_handle(cx));
+            self.focused = true;
             cx.notify();
             return;
         }
@@ -968,6 +1023,9 @@ impl CommandPopover {
     }
 
     fn tab_pressed(&mut self, _: &TabPressed, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.accepts_submission() {
+            return;
+        }
         if self.config.completion_on_tab {
             cx.emit(CommandPopoverEvent::CompletionRequested);
         } else {
@@ -975,8 +1033,20 @@ impl CommandPopover {
         }
     }
 
+    #[allow(
+        clippy::unused_self,
+        reason = "GPUI action listeners use the entity receiver."
+    )]
     fn navigate_back(&mut self, _: &NavigateBack, _: &mut Window, cx: &mut Context<Self>) {
         cx.emit(CommandPopoverEvent::NavigateBackRequested);
+    }
+
+    fn accepts_submission(&self) -> bool {
+        self.detail.is_none()
+            && matches!(
+                self.state.status(),
+                CommandPopoverStatus::Ready | CommandPopoverStatus::Empty(_)
+            )
     }
 
     fn cycle_tab(&mut self, delta: isize, cx: &mut Context<Self>) {
@@ -986,7 +1056,14 @@ impl CommandPopover {
             .iter()
             .position(|tab| tab.id.as_ref() == self.state.active_tab())
             .unwrap_or(0);
-        let next = (current as isize + delta).rem_euclid(self.config.tabs.len() as isize) as usize;
+        if self.config.tabs.is_empty() {
+            return;
+        }
+        let next = if delta > 0 {
+            (current + 1) % self.config.tabs.len()
+        } else {
+            (current + self.config.tabs.len() - 1) % self.config.tabs.len()
+        };
         let tab = self.config.tabs[next].id.clone();
         let _ = self.activate_tab(&tab, cx);
     }
@@ -1060,6 +1137,10 @@ impl CommandPopover {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "The declarative row tree keeps its layout and event handlers together."
+    )]
     fn render_item(
         &mut self,
         index: usize,
@@ -1093,7 +1174,7 @@ impl CommandPopover {
                     .inline_action()
                     .is_some_and(|(candidate, _)| candidate == row.id.as_ref())
                 {
-                    return self.render_confirmation(row, cx);
+                    return self.render_confirmation(&row, cx);
                 }
                 let highlighted = self.state.selected_row_id() == Some(row.id.as_ref());
                 let row_height = layout.row_height;
@@ -1115,8 +1196,17 @@ impl CommandPopover {
                     .group(group.clone())
                     .w_full()
                     .h(self.metrics.scaled(row_height))
-                    .px(self.metrics.scaled(layout.item_inset))
-                    .rounded(self.metrics.scaled(layout.row_radius))
+                    .px(self.metrics.scaled(
+                        if self.config.presentation == CommandPopoverPresentation::Modal {
+                            layout.horizontal_inset
+                        } else {
+                            layout.item_inset
+                        },
+                    ))
+                    .when(
+                        self.config.presentation != CommandPopoverPresentation::Modal,
+                        |element| element.rounded(self.metrics.scaled(layout.row_radius)),
+                    )
                     .flex()
                     .items_center()
                     .gap(self.metrics.scaled(layout.item_gap))
@@ -1134,7 +1224,11 @@ impl CommandPopover {
                             .hover(|style| style.bg(self.theme.hover))
                             .on_hover(cx.listener(move |popover, hovered: &bool, _, cx| {
                                 if *hovered {
-                                    let _ = popover.state.select_row(&hover_id);
+                                    if popover.detail.is_some()
+                                        || popover.state.select_row(&hover_id).is_err()
+                                    {
+                                        return;
+                                    }
                                     if let Some(selection) = popover.state.confirm() {
                                         cx.emit(CommandPopoverEvent::SelectionChanged(selection));
                                     }
@@ -1143,7 +1237,11 @@ impl CommandPopover {
                             }))
                             .on_click(cx.listener(
                                 move |popover, event: &gpui::ClickEvent, _, cx| {
-                                    let _ = popover.state.select_row(&id);
+                                    if popover.detail.is_some()
+                                        || popover.state.select_row(&id).is_err()
+                                    {
+                                        return;
+                                    }
                                     cx.emit(CommandPopoverEvent::RowClicked {
                                         row: id.clone(),
                                         shift: event.modifiers().shift,
@@ -1277,7 +1375,7 @@ impl CommandPopover {
                                         .cursor_pointer()
                                         .hover(|style| style.bg(self.theme.hover))
                                         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
-                                            cx.stop_propagation()
+                                            cx.stop_propagation();
                                         })
                                         .on_click(cx.listener(move |_, _, _, cx| {
                                             cx.emit(CommandPopoverEvent::RowAction {
@@ -1303,7 +1401,10 @@ impl CommandPopover {
                 div()
                     .w_full()
                     .h(self.metrics.scaled(row_height))
-                    .px(self.metrics.scaled(layout.outer_item_inset))
+                    .when(
+                        self.config.presentation != CommandPopoverPresentation::Modal,
+                        |element| element.px(self.metrics.scaled(layout.outer_item_inset)),
+                    )
                     .child(content)
                     .into_any_element()
             }
@@ -1312,7 +1413,7 @@ impl CommandPopover {
 
     fn render_confirmation(
         &mut self,
-        row: CommandPopoverRow,
+        row: &CommandPopoverRow,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let layout = CommandPopoverLayout::resolve(self.config.presentation, self.config.density);
@@ -1325,12 +1426,11 @@ impl CommandPopover {
             .actions
             .iter()
             .find(|action| action.id == action_id)
-            .map(|action| action.label.clone())
-            .unwrap_or_else(|| "Confirm".into());
+            .map_or_else(|| "Confirm".into(), |action| action.label.clone());
         let message = self
             .confirmation_message
             .clone()
-            .unwrap_or_else(|| format!("{}?", label).into());
+            .unwrap_or_else(|| format!("{label}?").into());
         let row_id = row.id.clone();
         let confirmed_action = SharedString::from(format!("confirm:{action_id}"));
         let content = div()
@@ -1559,6 +1659,10 @@ impl CommandPopover {
         Some(footer.into_any_element())
     }
 
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "Scrollbar calculations return to GPUI f32 pixel coordinates."
+    )]
     fn scrollbar_geometry(&self) -> Option<CommandPopoverScrollbarGeometry> {
         let viewport = self.scroll.viewport_bounds();
         let visible = f64::from(viewport.size.height);
@@ -1703,10 +1807,22 @@ struct CommandPopoverScrollbarGeometry {
 }
 
 impl Render for CommandPopover {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "The declarative popup tree keeps its focus and layout behavior together."
+    )]
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if !self.focused && self.config.presentation != CommandPopoverPresentation::Embedded {
+        if !self.focused
+            && (self.detail.is_some()
+                || self.focus_handle.is_focused(window)
+                || self.config.presentation != CommandPopoverPresentation::Embedded)
+        {
             self.focused = true;
-            window.focus(&self.input.focus_handle(cx));
+            if self.detail.is_some() {
+                window.focus(&self.focus_handle);
+            } else {
+                window.focus(&self.input.focus_handle(cx));
+            }
         }
         let viewport = window.viewport_size();
         let layout = CommandPopoverLayout::resolve(self.config.presentation, self.config.density);
@@ -1742,6 +1858,7 @@ impl Render for CommandPopover {
         }
         let mut panel = div()
             .id(self.config.id.clone())
+            .debug_selector(|| self.config.id.to_string())
             .key_context(KEY_CONTEXT)
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::select_next))
@@ -1768,7 +1885,7 @@ impl Render for CommandPopover {
             .flex_col()
             .when(
                 self.config.presentation == CommandPopoverPresentation::Embedded,
-                |element| element.w_full(),
+                Styled::w_full,
             )
             .when(
                 self.config.presentation != CommandPopoverPresentation::Embedded,
@@ -1813,10 +1930,8 @@ impl Render for CommandPopover {
                     .border_color(self.theme.border)
                     .cursor_pointer()
                     .hover(|style| style.bg(self.theme.hover))
-                    .on_click(cx.listener(|popover, _, _, cx| {
-                        popover.detail = None;
-                        popover.scroll.reset(popover.state.item_count());
-                        cx.notify();
+                    .on_click(cx.listener(|popover, _, window, cx| {
+                        popover.dismiss(&Dismiss, window, cx);
                     }))
                     .child(IconGlyph::new(
                         Icon::ChevronLeft,
@@ -1867,7 +1982,7 @@ impl Render for CommandPopover {
                                 .child(detail),
                         )
                     })
-                    .when_some(inline_tabs, |element, tabs| element.child(tabs)),
+                    .when_some(inline_tabs, ParentElement::child),
             )
         };
         let list = gpui::list(
@@ -1881,7 +1996,10 @@ impl Render for CommandPopover {
             }),
         )
         .w_full()
-        .pr(self.metrics.spacing5())
+        .when(
+            self.config.presentation != CommandPopoverPresentation::Modal || self.detail.is_some(),
+            |element| element.pr(self.metrics.spacing5()),
+        )
         .flex_grow()
         .min_h(px(0.0))
         .when(self.detail.is_none(), |element| {
@@ -1907,12 +2025,10 @@ impl Render for CommandPopover {
                 self.theme.fg_muted,
                 self.metrics,
             )),
-            (false, CommandPopoverStatus::Loading(message)) => {
-                panel.child(status_message(message, self.theme.fg_muted, self.metrics))
-            }
-            (false, CommandPopoverStatus::Empty(message)) => {
-                panel.child(status_message(message, self.theme.fg_muted, self.metrics))
-            }
+            (
+                false,
+                CommandPopoverStatus::Loading(message) | CommandPopoverStatus::Empty(message),
+            ) => panel.child(status_message(message, self.theme.fg_muted, self.metrics)),
             (false, CommandPopoverStatus::Error(message)) => {
                 panel.child(status_message(message, self.theme.danger, self.metrics))
             }
@@ -1954,7 +2070,21 @@ fn status_message(message: impl Into<SharedString>, color: Hsla, metrics: Metric
         .into_any_element()
 }
 
+impl std::fmt::Debug for CommandPopover {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CommandPopover")
+            .field("config", &self.config)
+            .field("state", &self.state)
+            .field("detail", &self.detail)
+            .finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
+#[allow(
+    clippy::float_cmp,
+    reason = "These geometry cases use exactly representable values."
+)]
 mod tests {
     use super::*;
 
@@ -2110,7 +2240,7 @@ mod tests {
         state.select_next();
         assert_eq!(state.selected_row_id(), Some("feature"));
 
-        state.activate_tab("stashes").unwrap();
+        assert!(state.activate_tab("stashes").is_ok());
         state.set_items(vec![
             CommandPopoverItem::section("Stashes"),
             CommandPopoverItem::row("stash@{0}"),
@@ -2119,12 +2249,12 @@ mod tests {
         state.set_query("wip");
         state.select_last();
 
-        state.activate_tab("branches").unwrap();
+        assert!(state.activate_tab("branches").is_ok());
         assert_eq!(state.query(), "feat");
         assert_eq!(state.selected_row_id(), Some("feature"));
         assert_eq!(state.item_count(), 5);
 
-        state.activate_tab("stashes").unwrap();
+        assert!(state.activate_tab("stashes").is_ok());
         assert_eq!(state.query(), "wip");
         assert_eq!(state.selected_row_id(), Some("stash@{1}"));
     }
@@ -2147,6 +2277,30 @@ mod tests {
         assert_eq!(state.selected_row_id(), Some("main"));
         state.select_previous();
         assert_eq!(state.selected_row_id(), Some("origin/main"));
+    }
+
+    #[test]
+    fn status_messages_hide_stale_actions_until_items_are_ready() {
+        let mut state = CommandPopoverState::new(["main"]);
+        state.set_items(vec![
+            CommandPopoverItem::row("old"),
+            CommandPopoverItem::row("next"),
+        ]);
+        for status in [
+            CommandPopoverStatus::Loading("Searching".into()),
+            CommandPopoverStatus::Empty("No results".into()),
+            CommandPopoverStatus::Error("Failed".into()),
+        ] {
+            state.set_status(status);
+            state.select_next();
+            state.select_last();
+            assert!(state.selected_row_id().is_none());
+            assert!(state.confirm().is_none());
+            assert!(state.select_row("old").is_err());
+            assert!(state.open_inline_action("old", "delete").is_err());
+        }
+        state.set_status(CommandPopoverStatus::Ready);
+        assert_eq!(state.selected_row_id(), Some("old"));
     }
 
     #[test]
@@ -2174,11 +2328,11 @@ mod tests {
     fn escape_closes_nested_actions_before_the_surface_and_confirm_is_identity_based() {
         let mut state = CommandPopoverState::new(["branches"]);
         state.set_items(rows());
-        state.open_inline_action("feature", "delete").unwrap();
+        assert!(state.open_inline_action("feature", "delete").is_ok());
         assert_eq!(state.escape(), CommandPopoverEscape::CloseInlineAction);
         assert_eq!(state.escape(), CommandPopoverEscape::Dismiss);
 
-        state.select_row("feature").unwrap();
+        assert!(state.select_row("feature").is_ok());
         assert_eq!(
             state.confirm(),
             Some(CommandPopoverSelection::new("feature"))
@@ -2222,5 +2376,216 @@ mod tests {
         assert!(offset.item_ix >= 15);
         assert_eq!(scrollbar_offset(&heights, offset), target);
         assert_eq!(scrollbar_offset(&heights, offset) + visible, content);
+    }
+}
+
+#[cfg(test)]
+mod gpui_regression_tests {
+    use super::*;
+    use crate::theme::ColorScheme;
+    use gpui::{TestAppContext, VisualTestContext};
+
+    struct Host {
+        popover: Entity<CommandPopover>,
+        events: Vec<CommandPopoverEvent>,
+        _subscription: Subscription,
+    }
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .id("popover-test-host")
+                .size_full()
+                .child(self.popover.clone())
+        }
+    }
+
+    fn open(
+        cx: &mut TestAppContext,
+        presentation: CommandPopoverPresentation,
+        completion_on_tab: bool,
+    ) -> (Entity<Host>, &mut VisualTestContext) {
+        cx.update(|cx| {
+            cx.bind_keys(text_input::key_bindings());
+            cx.bind_keys(key_bindings());
+        });
+        let (host, cx) = cx.add_window_view(|_, cx| {
+            let popover = cx.new(|cx| {
+                CommandPopover::new(
+                    CommandPopoverConfig {
+                        id: "tested-popover".into(),
+                        presentation,
+                        density: CommandPopoverDensity::Compact,
+                        tabs: vec![
+                            CommandPopoverTab::new("first", "First"),
+                            CommandPopoverTab::new("second", "Second"),
+                        ],
+                        placeholder: "Search".into(),
+                        footer_actions: Vec::new(),
+                        footer_hints: Vec::new(),
+                        width: None,
+                        height: Some(300.0),
+                        max_height: None,
+                        completion_on_tab,
+                        confirm_on_click: false,
+                    },
+                    Theme::from_scheme(&ColorScheme::default()),
+                    Metrics::new(1.0),
+                    cx,
+                )
+            });
+            let subscription = cx.subscribe(&popover, |host: &mut Host, _, event, _| {
+                host.events.push(event.clone());
+            });
+            Host {
+                popover,
+                events: Vec::new(),
+                _subscription: subscription,
+            }
+        });
+        let popover = host.read_with(cx, |host, _| host.popover.clone());
+        cx.update(|window, cx| window.focus(&popover.read(cx).input.focus_handle(cx)));
+        cx.run_until_parked();
+        (host, cx)
+    }
+
+    fn assert_input_focused(popover: &Entity<CommandPopover>, cx: &mut VisualTestContext) {
+        cx.update(|window, cx| {
+            assert!(
+                popover.read(cx).input.focus_handle(cx).is_focused(window),
+                "input lost focus in {:?}",
+                popover.read(cx).config.presentation,
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn nested_detail_escape_restores_input_focus(cx: &mut TestAppContext) {
+        for presentation in [
+            CommandPopoverPresentation::Modal,
+            CommandPopoverPresentation::Popover,
+            CommandPopoverPresentation::Embedded,
+        ] {
+            let (host, cx) = open(cx, presentation, false);
+            let popover = host.read_with(cx, |host, _| host.popover.clone());
+            popover.update(cx, |popover, cx| {
+                popover.set_items(vec![CommandPopoverItem::row("first")], cx);
+                popover.show_detail("Details", "one\ntwo\nthree", cx);
+            });
+            cx.run_until_parked();
+            cx.update(|window, cx| assert!(popover.read(cx).focus_handle.is_focused(window)));
+            cx.simulate_keystrokes("escape");
+            assert!(popover.read_with(cx, |popover, _| popover.detail.is_none()));
+            assert_eq!(
+                popover.read_with(cx, |popover, _| popover.scroll.item_count()),
+                1
+            );
+            assert_input_focused(&popover, cx);
+            assert!(
+                !host
+                    .read_with(cx, |host, _| host.events.clone())
+                    .contains(&CommandPopoverEvent::Dismissed)
+            );
+            cx.simulate_keystrokes("escape");
+            assert_eq!(
+                host.read_with(cx, |host, _| host.events.clone()),
+                vec![CommandPopoverEvent::Dismissed]
+            );
+        }
+    }
+
+    #[gpui::test]
+    fn detail_refresh_and_tab_change_keep_the_visible_content_consistent(cx: &mut TestAppContext) {
+        for presentation in [
+            CommandPopoverPresentation::Modal,
+            CommandPopoverPresentation::Popover,
+            CommandPopoverPresentation::Embedded,
+        ] {
+            let (host, cx) = open(cx, presentation, false);
+            let popover = host.read_with(cx, |host, _| host.popover.clone());
+            popover.update(cx, |popover, cx| {
+                popover.show_detail("Details", "one\ntwo\nthree", cx);
+            });
+            cx.run_until_parked();
+            popover.update(cx, |popover, cx| {
+                popover.set_items(vec![CommandPopoverItem::row("replacement")], cx);
+            });
+            cx.run_until_parked();
+            assert_eq!(
+                popover.read_with(cx, |popover, _| popover.scroll.item_count()),
+                3
+            );
+            cx.simulate_keystrokes("down enter alt-enter tab");
+            assert!(host.read_with(cx, |host, _| host.events.clone()).is_empty());
+            cx.simulate_keystrokes("ctrl-tab");
+            assert_eq!(
+                popover.read_with(cx, |popover, _| popover.active_tab().to_owned()),
+                "second"
+            );
+            assert!(popover.read_with(cx, |popover, _| popover.detail.is_none()));
+            assert_eq!(
+                popover.read_with(cx, |popover, _| popover.scroll.item_count()),
+                0
+            );
+            assert_input_focused(&popover, cx);
+            assert!(
+                host.read_with(cx, |host, _| host.events.clone())
+                    .contains(&CommandPopoverEvent::TabChanged("second".into()))
+            );
+            cx.simulate_keystrokes("ctrl-shift-tab enter");
+            assert!(host.read_with(cx, |host, _| host.events.clone()).contains(
+                &CommandPopoverEvent::Confirmed(CommandPopoverSelection::new("replacement"))
+            ));
+        }
+    }
+
+    #[gpui::test]
+    fn hidden_status_rows_do_not_receive_keyboard_actions(cx: &mut TestAppContext) {
+        let (host, cx) = open(cx, CommandPopoverPresentation::Popover, true);
+        let popover = host.read_with(cx, |host, _| host.popover.clone());
+        popover.update(cx, |popover, cx| {
+            popover.set_items(
+                vec![
+                    CommandPopoverItem::row("old"),
+                    CommandPopoverItem::row("next"),
+                ],
+                cx,
+            );
+        });
+        for status in [
+            CommandPopoverStatus::Loading("Searching".into()),
+            CommandPopoverStatus::Error("Failed".into()),
+        ] {
+            popover.update(cx, |popover, cx| popover.set_status(status, cx));
+            cx.run_until_parked();
+            cx.simulate_keystrokes("down up enter alt-enter cmd-enter tab shift-tab");
+            assert!(host.read_with(cx, |host, _| host.events.clone()).is_empty());
+        }
+        popover.update(cx, |popover, cx| {
+            popover.set_status(CommandPopoverStatus::Empty("No results".into()), cx);
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("down up enter alt-enter cmd-enter tab shift-tab");
+        assert_eq!(
+            host.read_with(cx, |host, _| host.events.clone()),
+            vec![
+                CommandPopoverEvent::Submitted { secondary: false },
+                CommandPopoverEvent::Submitted { secondary: true },
+                CommandPopoverEvent::Submitted { secondary: true },
+                CommandPopoverEvent::CompletionRequested,
+            ]
+        );
+        host.update(cx, |host, _| host.events.clear());
+        popover.update(cx, |popover, cx| {
+            popover.set_status(CommandPopoverStatus::Ready, cx);
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("enter");
+        assert_eq!(
+            host.read_with(cx, |host, _| host.events.clone()),
+            vec![CommandPopoverEvent::Confirmed(
+                CommandPopoverSelection::new("old")
+            )]
+        );
     }
 }

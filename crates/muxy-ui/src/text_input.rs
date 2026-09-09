@@ -1,3 +1,5 @@
+use muxy_core::shortcuts::ShortcutId;
+
 use crate::scrollbar::{MINIMUM_THUMB_LENGTH, TRACK_INSET, ThumbGeometry, WIDTH};
 use crate::theme::{Metrics, Theme};
 use gpui::{
@@ -67,77 +69,56 @@ pub fn growing_input(input: &Entity<TextInput>) -> impl IntoElement {
     div().flex_grow().min_w(px(0.0)).child(input.clone())
 }
 
+pub fn register_shortcuts(registry: &mut crate::shortcuts::Registry<'_>) {
+    registry.register(ShortcutId::TextInputBackspace, &Backspace);
+    registry.register(ShortcutId::TextInputDelete, &Delete);
+    registry.register(ShortcutId::TextInputLeft, &Left);
+    registry.register(ShortcutId::TextInputRight, &Right);
+    registry.register(ShortcutId::TextInputWordLeft, &WordLeft);
+    registry.register(ShortcutId::TextInputWordRight, &WordRight);
+    registry.register(ShortcutId::TextInputHome, &Home);
+    registry.register(ShortcutId::TextInputEnd, &End);
+    registry.register(ShortcutId::TextInputSelectLeft, &SelectLeft);
+    registry.register(ShortcutId::TextInputSelectRight, &SelectRight);
+    registry.register(ShortcutId::TextInputSelectWordLeft, &SelectWordLeft);
+    registry.register(ShortcutId::TextInputSelectWordRight, &SelectWordRight);
+    registry.register(ShortcutId::TextInputSelectHome, &SelectHome);
+    registry.register(ShortcutId::TextInputSelectEnd, &SelectEnd);
+    registry.register(ShortcutId::TextInputSelectAll, &SelectAll);
+    registry.register(ShortcutId::TextInputCopy, &Copy);
+    registry.register(ShortcutId::TextInputCut, &Cut);
+    registry.register(ShortcutId::TextInputPaste, &Paste);
+    registry.register(ShortcutId::TextInputUndo, &Undo);
+    registry.register(ShortcutId::TextInputRedo, &Redo);
+    registry.register(ShortcutId::TextInputDocumentStart, &DocumentStart);
+    registry.register(ShortcutId::TextInputDocumentEnd, &DocumentEnd);
+    registry.register(
+        ShortcutId::TextInputShowCharacterPalette,
+        &ShowCharacterPalette,
+    );
+    registry.register(ShortcutId::TextInputInsertNewline, &InsertNewline);
+    registry.register(ShortcutId::TextInputUp, &Up);
+    registry.register(ShortcutId::TextInputDown, &Down);
+    registry.register(ShortcutId::TextInputSelectUp, &SelectUp);
+    registry.register(ShortcutId::TextInputSelectDown, &SelectDown);
+    registry.register(ShortcutId::TextInputDeleteWord, &DeleteWord);
+    registry.register(ShortcutId::TextInputPageUp, &PageUp);
+    registry.register(ShortcutId::TextInputPageDown, &PageDown);
+    registry.register(ShortcutId::TextInputSelectPageUp, &SelectPageUp);
+    registry.register(ShortcutId::TextInputSelectPageDown, &SelectPageDown);
+    registry.register(
+        ShortcutId::TextInputSelectDocumentStart,
+        &SelectDocumentStart,
+    );
+    registry.register(ShortcutId::TextInputSelectDocumentEnd, &SelectDocumentEnd);
+    registry.register(ShortcutId::TextInputSubmit, &Submit);
+    registry.register(ShortcutId::TextInputCancel, &Cancel);
+}
+
 pub fn key_bindings() -> Vec<gpui::KeyBinding> {
-    [
-        DEFAULT_CONTEXT,
-        BARE_CONTEXT,
-        SEARCH_CONTEXT,
-        MULTILINE_CONTEXT,
-    ]
-    .into_iter()
-    .flat_map(editing_bindings)
-    .chain(
-        [DEFAULT_CONTEXT, SEARCH_CONTEXT]
-            .into_iter()
-            .flat_map(|context| {
-                vec![
-                    gpui::KeyBinding::new("enter", Submit, Some(context)),
-                    gpui::KeyBinding::new("escape", Cancel, Some(context)),
-                    gpui::KeyBinding::new("alt-backspace", DeleteWord, Some(context)),
-                ]
-            }),
-    )
-    .chain(multiline_bindings())
-    .collect()
-}
-
-fn multiline_bindings() -> Vec<gpui::KeyBinding> {
-    let context = Some(MULTILINE_CONTEXT);
-    vec![
-        gpui::KeyBinding::new("enter", InsertNewline, context),
-        gpui::KeyBinding::new("up", Up, context),
-        gpui::KeyBinding::new("down", Down, context),
-        gpui::KeyBinding::new("shift-up", SelectUp, context),
-        gpui::KeyBinding::new("shift-down", SelectDown, context),
-        gpui::KeyBinding::new("alt-backspace", DeleteWord, context),
-        gpui::KeyBinding::new("pageup", PageUp, context),
-        gpui::KeyBinding::new("pagedown", PageDown, context),
-        gpui::KeyBinding::new("shift-pageup", SelectPageUp, context),
-        gpui::KeyBinding::new("shift-pagedown", SelectPageDown, context),
-        gpui::KeyBinding::new("cmd-up", DocumentStart, context),
-        gpui::KeyBinding::new("cmd-down", DocumentEnd, context),
-        gpui::KeyBinding::new("shift-cmd-up", SelectDocumentStart, context),
-        gpui::KeyBinding::new("shift-cmd-down", SelectDocumentEnd, context),
-    ]
-}
-
-fn editing_bindings(context: &'static str) -> Vec<gpui::KeyBinding> {
-    let context = Some(context);
-    vec![
-        gpui::KeyBinding::new("backspace", Backspace, context),
-        gpui::KeyBinding::new("delete", Delete, context),
-        gpui::KeyBinding::new("left", Left, context),
-        gpui::KeyBinding::new("right", Right, context),
-        gpui::KeyBinding::new("alt-left", WordLeft, context),
-        gpui::KeyBinding::new("alt-right", WordRight, context),
-        gpui::KeyBinding::new("cmd-left", Home, context),
-        gpui::KeyBinding::new("cmd-right", End, context),
-        gpui::KeyBinding::new("shift-left", SelectLeft, context),
-        gpui::KeyBinding::new("shift-right", SelectRight, context),
-        gpui::KeyBinding::new("shift-alt-left", SelectWordLeft, context),
-        gpui::KeyBinding::new("shift-alt-right", SelectWordRight, context),
-        gpui::KeyBinding::new("shift-cmd-left", SelectHome, context),
-        gpui::KeyBinding::new("shift-cmd-right", SelectEnd, context),
-        gpui::KeyBinding::new("cmd-a", SelectAll, context),
-        gpui::KeyBinding::new("cmd-c", Copy, context),
-        gpui::KeyBinding::new("cmd-x", Cut, context),
-        gpui::KeyBinding::new("cmd-v", Paste, context),
-        gpui::KeyBinding::new("cmd-z", Undo, context),
-        gpui::KeyBinding::new("shift-cmd-z", Redo, context),
-        gpui::KeyBinding::new("home", DocumentStart, context),
-        gpui::KeyBinding::new("end", DocumentEnd, context),
-        gpui::KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, context),
-    ]
+    let mut registry = crate::shortcuts::Registry::new(&muxy_core::shortcuts::Defaults);
+    register_shortcuts(&mut registry);
+    registry.into_bindings()
 }
 
 pub fn line_ranges(text: &str) -> Vec<Range<usize>> {
@@ -347,7 +328,9 @@ impl History {
         if let Some(mut edit) = self.composing.take() {
             edit.inserted = inserted;
             self.coalesce = false;
-            self.record(edit, false);
+            if edit.removed != edit.inserted {
+                self.record(edit, false);
+            }
         }
     }
 }
@@ -400,6 +383,12 @@ struct Layout {
     bounds: Bounds<Pixels>,
 }
 
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Text rows are mapped to GPUI f32 coordinates and clamped before indexing."
+)]
 impl Layout {
     fn total_rows(&self) -> usize {
         self.rows.iter().sum()
@@ -482,8 +471,9 @@ impl Layout {
         };
         let end = boundaries
             .get(local)
-            .map(|boundary| wrap_index(shaped, *boundary))
-            .unwrap_or(shaped.unwrapped_layout.len);
+            .map_or(shaped.unwrapped_layout.len, |boundary| {
+                wrap_index(shaped, *boundary)
+            });
         let base = shaped.unwrapped_layout.x_for_index(start);
         Some((line, range.start + start..range.start + end, base))
     }
@@ -503,10 +493,10 @@ fn wrap_index(line: &WrappedLine, boundary: WrapBoundary) -> usize {
         .runs
         .get(boundary.run_ix)
         .and_then(|run| run.glyphs.get(boundary.glyph_ix))
-        .map(|glyph| glyph.index)
-        .unwrap_or(line.unwrapped_layout.len)
+        .map_or(line.unwrapped_layout.len, |glyph| glyph.index)
 }
 
+#[derive(Debug)]
 pub enum InputEvent {
     Changed,
     Submitted,
@@ -515,6 +505,11 @@ pub enum InputEvent {
 
 type PasteDelegate = Rc<RefCell<Box<dyn FnMut(&mut Window, &mut App) -> bool + 'static>>>;
 
+#[must_use]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "Focus, selection, wrapping, and cursor visibility are independent editing states."
+)]
 pub struct TextInput {
     focus_handle: FocusHandle,
     content: SharedString,
@@ -869,6 +864,10 @@ impl TextInput {
         self.replace_text_in_range(None, "", window, cx);
     }
 
+    #[allow(
+        clippy::unused_self,
+        reason = "GPUI action listeners use the entity receiver."
+    )]
     fn show_character_palette(
         &mut self,
         _: &ShowCharacterPalette,
@@ -936,6 +935,10 @@ impl TextInput {
         self.vertical(self.rows_per_page(), true, cx);
     }
 
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "A pixel height becomes a whole row count."
+    )]
     fn rows_per_page(&self) -> isize {
         let Some(layout) = self.last_layout.as_ref() else {
             return 1;
@@ -958,6 +961,10 @@ impl TextInput {
         self.goal_x = goal;
     }
 
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "GPUI measures row positions with f32 coordinates."
+    )]
     fn offset_in_row(&mut self, delta: isize) -> usize {
         let offset = self.cursor_offset();
         let length = self.content.len();
@@ -967,8 +974,10 @@ impl TextInput {
         let goal = self
             .goal_x
             .unwrap_or_else(|| layout.position_for_offset(offset).x);
-        let total = layout.total_rows() as isize;
-        let row = layout.row_of_offset(offset) as isize + delta;
+        let total = isize::try_from(layout.total_rows()).unwrap_or(isize::MAX);
+        let row = isize::try_from(layout.row_of_offset(offset))
+            .unwrap_or(isize::MAX)
+            .saturating_add(delta);
         let target = if row < 0 {
             0
         } else if row >= total {
@@ -998,10 +1007,18 @@ impl TextInput {
         }
     }
 
+    #[allow(
+        clippy::unused_self,
+        reason = "GPUI action listeners use the entity receiver."
+    )]
     fn submit(&mut self, _: &Submit, _: &mut Window, cx: &mut Context<Self>) {
         cx.emit(InputEvent::Submitted);
     }
 
+    #[allow(
+        clippy::unused_self,
+        reason = "GPUI action listeners use the entity receiver."
+    )]
     fn cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
         cx.emit(InputEvent::Cancelled);
     }
@@ -1080,8 +1097,7 @@ impl TextInput {
         let outside = self
             .last_layout
             .as_ref()
-            .map(|layout| layout.bounds.localize(&position).is_none())
-            .unwrap_or(false);
+            .is_some_and(|layout| layout.bounds.localize(&position).is_none());
         if !outside {
             self.autoscroll = None;
             return;
@@ -1094,7 +1110,7 @@ impl TextInput {
                 cx.background_executor()
                     .timer(Duration::from_millis(50))
                     .await;
-                let Ok(running) = input.update(cx, |input, cx| input.autoscroll_tick(cx)) else {
+                let Ok(running) = input.update(cx, TextInput::autoscroll_tick) else {
                     break;
                 };
                 if !running {
@@ -1251,8 +1267,7 @@ impl TextInput {
         self.content
             .split_word_bound_indices()
             .find(|(index, word)| *index > offset && !word.trim().is_empty())
-            .map(|(index, _)| index)
-            .unwrap_or(self.content.len())
+            .map_or(self.content.len(), |(index, _)| index)
     }
 
     fn offset_from_utf16(&self, offset: usize) -> usize {
@@ -1391,16 +1406,19 @@ impl EntityInputHandler for TextInput {
         self.content = replace_content(&self.content, range.clone(), new_text);
         self.marked_range =
             (!new_text.is_empty()).then(|| range.start..range.start + new_text.len());
-        self.selected_range = new_selected_range_utf16
-            .as_ref()
-            .map(|selected| {
-                range.start + utf8_offset_from_utf16(new_text, selected.start)
-                    ..range.start + utf8_offset_from_utf16(new_text, selected.end)
-            })
-            .unwrap_or_else(|| {
+        if self.marked_range.is_none() {
+            self.history.end_composition(String::new());
+        }
+        self.selected_range = new_selected_range_utf16.as_ref().map_or_else(
+            || {
                 let cursor = range.start + new_text.len();
                 cursor..cursor
-            });
+            },
+            |selected| {
+                range.start + utf8_offset_from_utf16(new_text, selected.start)
+                    ..range.start + utf8_offset_from_utf16(new_text, selected.end)
+            },
+        );
         self.selection_reversed = false;
         self.follow_caret = true;
         cx.emit(InputEvent::Changed);
@@ -1570,12 +1588,19 @@ impl Element for TextElement {
         (window.request_layout(style, [], cx), ())
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "GPUI prepaint shapes text and maps visible rows to f32 pixel coordinates."
+    )]
     fn prepaint(
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&gpui::InspectorElementId>,
         bounds: Bounds<Pixels>,
-        _: &mut Self::RequestLayoutState,
+        (): &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
@@ -1790,12 +1815,16 @@ impl Element for TextElement {
         }
     }
 
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "Selection row indices become GPUI f32 pixel coordinates."
+    )]
     fn paint(
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&gpui::InspectorElementId>,
         bounds: Bounds<Pixels>,
-        _: &mut Self::RequestLayoutState,
+        (): &mut Self::RequestLayoutState,
         prepaint: &mut Self::PrepaintState,
         window: &mut Window,
         cx: &mut App,
@@ -1894,7 +1923,21 @@ impl Element for TextElement {
     }
 }
 
+impl std::fmt::Debug for TextInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TextInput")
+            .field("content", &self.content)
+            .field("selected_range", &self.selected_range)
+            .field("marked_range", &self.marked_range)
+            .finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
+#[allow(
+    clippy::float_cmp,
+    reason = "These geometry cases use exactly representable values."
+)]
 mod tests {
     use gpui::{point, px, size};
 
@@ -2107,6 +2150,37 @@ mod tests {
     }
 
     #[test]
+    fn canceled_composition_does_not_move_the_next_undo_target() {
+        let mut history = super::History::default();
+        history.redo.push(edit(0, "", "redo"));
+        history.begin_composition(2, String::new(), 2..2, false);
+        history.end_composition(String::new());
+        assert!(history.composing.is_none());
+        assert!(history.undo.is_empty());
+        assert_eq!(history.redo.len(), 1);
+        history.begin_composition(0, String::new(), 0..0, false);
+        history.end_composition("Y".into());
+        assert_eq!(history.undo.len(), 1);
+        let edit = &history.undo[0];
+        let restored =
+            super::replace_content("Yab", edit.at..edit.at + edit.inserted.len(), &edit.removed);
+        assert_eq!(restored, "ab");
+    }
+
+    #[test]
+    fn canceled_selection_replacement_remains_undoable() {
+        let mut history = super::History::default();
+        history.begin_composition(1, "b".into(), 1..2, false);
+        history.end_composition(String::new());
+        assert_eq!(history.undo.len(), 1);
+        let edit = &history.undo[0];
+        assert_eq!(
+            super::replace_content("a", edit.at..edit.at, &edit.removed),
+            "ab"
+        );
+    }
+
+    #[test]
     fn recording_clears_the_redo_stack_and_the_undo_stack_is_capped() {
         let mut history = super::History::default();
         history.redo.push(edit(0, "", "x"));
@@ -2129,5 +2203,135 @@ mod tests {
         assert_eq!(history.undo.len(), 1);
         assert_eq!(history.undo[0].removed, "cd");
         assert_eq!(history.undo[0].at, 3);
+    }
+}
+
+#[cfg(test)]
+mod gpui_regression_tests {
+    use super::*;
+    use crate::theme::ColorScheme;
+    use gpui::{TestAppContext, VisualTestContext};
+
+    fn open<'a>(
+        cx: &'a mut TestAppContext,
+        text: &str,
+    ) -> (Entity<TextInput>, &'a mut VisualTestContext) {
+        cx.update(|cx| cx.bind_keys(key_bindings()));
+        let text = text.to_owned();
+        cx.add_window_view(|window, cx| {
+            let input = TextInput::new(
+                InputStyle::field(
+                    &Theme::from_scheme(&ColorScheme::default()),
+                    &Metrics::new(1.0),
+                ),
+                cx,
+            )
+            .with_text(text);
+            window.focus(&input.focus_handle);
+            input
+        })
+    }
+
+    fn mark(input: &Entity<TextInput>, cx: &mut VisualTestContext, text: &str) {
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| {
+                input.replace_and_mark_text_in_range(None, text, None, window, cx);
+            });
+        });
+        cx.run_until_parked();
+    }
+
+    fn commit(input: &Entity<TextInput>, cx: &mut VisualTestContext, text: &str) {
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| {
+                input.replace_text_in_range(None, text, window, cx);
+            });
+        });
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn canceled_ime_does_not_corrupt_the_next_composition_undo(cx: &mut TestAppContext) {
+        let (input, cx) = open(cx, "ab");
+        mark(&input, cx, "x");
+        assert_eq!(
+            input.read_with(cx, |input, _| input.text().to_owned()),
+            "abx"
+        );
+        mark(&input, cx, "");
+        assert_eq!(
+            input.read_with(cx, |input, _| input.text().to_owned()),
+            "ab"
+        );
+        cx.simulate_keystrokes("cmd-left");
+        assert_eq!(input.read_with(cx, |input, _| input.selected_range()), 0..0);
+        mark(&input, cx, "y");
+        commit(&input, cx, "Y");
+        assert_eq!(
+            input.read_with(cx, |input, _| input.text().to_owned()),
+            "Yab"
+        );
+        cx.simulate_keystrokes("cmd-z");
+        assert_eq!(
+            input.read_with(cx, |input, _| input.text().to_owned()),
+            "ab"
+        );
+        assert_eq!(input.read_with(cx, |input, _| input.selected_range()), 0..0);
+        assert!(input.read_with(cx, |input, _| input.marked_range.is_none()));
+    }
+
+    #[gpui::test]
+    fn canceled_ime_preserves_redo_for_an_unchanged_document(cx: &mut TestAppContext) {
+        let (input, cx) = open(cx, "ab");
+        cx.simulate_input("x");
+        cx.simulate_keystrokes("cmd-z");
+        assert_eq!(
+            input.read_with(cx, |input, _| input.text().to_owned()),
+            "ab"
+        );
+        mark(&input, cx, "x");
+        mark(&input, cx, "");
+        cx.simulate_keystrokes("cmd-shift-z");
+        assert_eq!(
+            input.read_with(cx, |input, _| input.text().to_owned()),
+            "abx"
+        );
+        assert_eq!(input.read_with(cx, |input, _| input.selected_range()), 3..3);
+    }
+
+    #[gpui::test]
+    fn canceled_ime_replacing_non_bmp_selection_remains_undoable(cx: &mut TestAppContext) {
+        let (input, cx) = open(cx, "a😀b");
+        cx.simulate_keystrokes("cmd-left right shift-right");
+        assert_eq!(input.read_with(cx, |input, _| input.selected_range()), 1..5);
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| {
+                input.replace_and_mark_text_in_range(Some(1..3), "x", Some(1..1), window, cx);
+                assert_eq!(input.marked_text_range(window, cx), Some(1..2));
+            });
+        });
+        cx.run_until_parked();
+        mark(&input, cx, "");
+        assert_eq!(
+            input.read_with(cx, |input, _| input.text().to_owned()),
+            "ab"
+        );
+        cx.simulate_keystrokes("cmd-z");
+        assert_eq!(
+            input.read_with(cx, |input, _| input.text().to_owned()),
+            "a😀b"
+        );
+        assert_eq!(input.read_with(cx, |input, _| input.selected_range()), 1..5);
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| {
+                let selection = input.selected_text_range(false, window, cx);
+                assert_eq!(selection.map(|selection| selection.range), Some(1..3));
+            });
+        });
+        cx.simulate_keystrokes("cmd-shift-z");
+        assert_eq!(
+            input.read_with(cx, |input, _| input.text().to_owned()),
+            "ab"
+        );
     }
 }

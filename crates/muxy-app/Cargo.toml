@@ -1,0 +1,27 @@
+[package]
+name = "muxy-app"
+description = "The Muxy app executable"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+muxy-core = { path = "../muxy-core" }
+muxy-ui = { path = "../muxy-ui" }
+async-channel = "2"
+gpui = { version = "=0.2.2", default-features = false, features = ["font-kit"] }
+muxy-app-core = { path = "../muxy-app-core" }
+muxy-client = { path = "../muxy-client" }
+muxy-protocol = { path = "../muxy-protocol" }
+muxy-settings = { path = "../muxy-settings" }
+
+[dev-dependencies]
+muxy-wire = { path = "../muxy-wire" }
+gpui = { version = "=0.2.2", default-features = false, features = ["test-support"] }
+
+[lints]
+workspace = true
