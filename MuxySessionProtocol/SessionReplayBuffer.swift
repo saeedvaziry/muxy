@@ -45,7 +45,7 @@ public struct SessionReplayBuffer: Sendable {
         }
         let trailing = TerminalStreamSequence.trailingSafeEnd(in: output)
         guard trailing > 0 else { return [] }
-        return Array(output[..<trailing])
+        return TerminalStreamSequence.removingResponseQueries(from: Array(output[..<trailing]))
     }
 
     private mutating func appendForReplay(_ bytes: [UInt8]) {

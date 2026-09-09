@@ -78,7 +78,7 @@ struct MobileScrollbackBuffer: Sendable {
         }
         let trailing = TerminalStreamSequence.trailingSafeEnd(in: output)
         guard trailing > 0 else { return [] }
-        output = Array(output[..<trailing])
+        output = TerminalStreamSequence.removingResponseQueries(from: Array(output[..<trailing]))
         return MobileScrollbackBuffer.replayPrefix + output
     }
 

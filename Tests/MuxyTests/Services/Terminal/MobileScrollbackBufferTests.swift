@@ -33,6 +33,14 @@ struct MobileScrollbackBufferTests {
         #expect(buffer.replayBytes == replayPrefix + Array("hello".utf8))
     }
 
+    @Test("replay removes terminal queries that generate input responses")
+    func replayRemovesTerminalResponseQueries() {
+        var buffer = MobileScrollbackBuffer(capacity: 128)
+        buffer.append(Array("before\u{1B}]10;?\u{7}after".utf8), byteLimit: 128)
+
+        #expect(buffer.replayBytes == replayPrefix + Array("beforeafter".utf8))
+    }
+
     @Test("replay head jumps to a line boundary after trimming")
     func replayHeadAlignsToLine() {
         var buffer = MobileScrollbackBuffer(capacity: 5)
