@@ -141,11 +141,18 @@ impl MainWindow {
             cx.spawn(async move |window, cx| {
                 if answer.await == Some(0) {
                     let _ = window.update(cx, |window, cx| {
-                        window.close_tab_confirmed(&tab_id, cx);
+                        window.close_tab_after_confirmation(&tab_id, cx);
                     });
                 }
             })
             .detach();
+            return;
+        }
+        self.close_tab_after_confirmation(tab_id, cx);
+    }
+
+    fn close_tab_after_confirmation(&mut self, tab_id: &str, cx: &mut Context<Self>) {
+        if self.request_extension_webview_close(tab_id, cx) {
             return;
         }
         self.close_tab_confirmed(tab_id, cx);

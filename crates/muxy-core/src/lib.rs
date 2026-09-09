@@ -1,6 +1,7 @@
 pub mod composer;
 pub mod dropped_paths;
 pub mod environment;
+pub mod extensions;
 pub mod fold;
 pub mod migration;
 pub mod navigation;

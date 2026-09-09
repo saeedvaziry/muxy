@@ -332,6 +332,7 @@ type PanelActionHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 enum PanelActionContent {
     Glyph(SharedString),
     Icon(Icon),
+    Element(AnyElement),
 }
 
 pub struct PanelAction {
@@ -378,6 +379,23 @@ impl PanelAction {
         }
     }
 
+    pub fn element(
+        id: impl Into<ElementId>,
+        label: impl Into<SharedString>,
+        element: impl IntoElement,
+        focus_handle: FocusHandle,
+        handler: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            content: PanelActionContent::Element(element.into_any_element()),
+            focus_handle: focus_handle.tab_stop(true),
+            handler: Rc::new(handler),
+            selected: false,
+        }
+    }
+
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
         self
@@ -397,9 +415,9 @@ pub struct PanelChrome {
     title: SharedString,
     icon: Option<AnyElement>,
     focus_handle: FocusHandle,
-    move_action: PanelAction,
-    mode_action: PanelAction,
-    close_action: PanelAction,
+    move_action: Option<PanelAction>,
+    mode_action: Option<PanelAction>,
+    close_action: Option<PanelAction>,
     trailing_actions: Vec<PanelAction>,
     theme: Theme,
     metrics: Metrics,
@@ -419,9 +437,9 @@ impl PanelChrome {
             title: title.into(),
             icon,
             focus_handle,
-            move_action,
-            mode_action,
-            close_action,
+            move_action: Some(move_action),
+            mode_action: Some(mode_action),
+            close_action: Some(close_action),
             trailing_actions: Vec::new(),
             theme: style.theme,
             metrics: style.metrics,
@@ -430,6 +448,21 @@ impl PanelChrome {
 
     pub fn with_trailing_action(mut self, action: PanelAction) -> Self {
         self.trailing_actions.push(action);
+        self
+    }
+
+    pub fn without_move_action(mut self) -> Self {
+        self.move_action = None;
+        self
+    }
+
+    pub fn without_mode_action(mut self) -> Self {
+        self.mode_action = None;
+        self
+    }
+
+    pub fn without_close_action(mut self) -> Self {
+        self.close_action = None;
         self
     }
 }
@@ -471,24 +504,18 @@ impl RenderOnce for PanelChrome {
                     .into_iter()
                     .map(|action| panel_action(action, &self.theme, &self.metrics, window)),
             )
-            .child(panel_action(
-                self.move_action,
-                &self.theme,
-                &self.metrics,
-                window,
-            ))
-            .child(panel_action(
-                self.mode_action,
-                &self.theme,
-                &self.metrics,
-                window,
-            ))
-            .child(panel_action(
-                self.close_action,
-                &self.theme,
-                &self.metrics,
-                window,
-            ))
+            .children(
+                self.move_action
+                    .map(|action| panel_action(action, &self.theme, &self.metrics, window)),
+            )
+            .children(
+                self.mode_action
+                    .map(|action| panel_action(action, &self.theme, &self.metrics, window)),
+            )
+            .children(
+                self.close_action
+                    .map(|action| panel_action(action, &self.theme, &self.metrics, window)),
+            )
     }
 }
 
@@ -524,7 +551,8 @@ fn panel_action(
             .on_key(move |window, cx| handler(window, cx))
             .into_any_element();
         }
-        PanelActionContent::Glyph(glyph) => glyph,
+        PanelActionContent::Element(element) => element,
+        PanelActionContent::Glyph(glyph) => div().child(glyph).into_any_element(),
     };
     let group = SharedString::from(format!("panel-action-{label}"));
     let click_handler = handler.clone();

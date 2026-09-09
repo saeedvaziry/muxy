@@ -1,9 +1,12 @@
 use super::*;
+use gpui::prelude::FluentBuilder;
+use gpui::{ParentElement, Styled};
 
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_repository_context(cx);
         self.reconcile_terminals(window, cx);
+        self.reconcile_extension_webviews(window, cx);
         self.sync_active_notification_read_state(cx);
         let project_ids = self
             .state
@@ -73,6 +76,8 @@ impl Render for MainWindow {
             .map(|drag| (drag.tab_id.as_str(), drag.origin));
         let theme = self.state.theme.clone();
         let metrics = self.state.metrics;
+        let extension_topbar_items = self.extension_runtime.topbar_bindings();
+        let extension_statusbar_items = self.extension_runtime.status_bar_bindings();
         let app = crate::views::app::render(
             crate::views::app::AppView {
                 state: &self.state,
@@ -83,6 +88,9 @@ impl Render for MainWindow {
                 workspace_focus: &self.view.workspace_focus,
                 menu_focus: &self.view.menu_focus,
                 terminals: &self.terminal_runtime.surfaces,
+                extension_webviews: &self.extension_webviews,
+                extension_surfaces: &self.extension_surfaces,
+                extension_popover_anchor: self.extension_popover_anchor,
                 area_bounds: &self.view.workspace.area_bounds,
                 search_inputs: &self.view.terminal.search_inputs,
                 scrollbar_reveal: &self.view.terminal.scrollbar_reveal,
@@ -100,10 +108,26 @@ impl Render for MainWindow {
                 focused_working_directory,
                 expanded_worktree_projects: self.view.worktrees.expanded_projects(),
                 composer: &self.composer,
+                panels: &self.panels,
+                extension_topbar_items: &extension_topbar_items,
+                extension_statusbar_items: &extension_statusbar_items,
             },
             window,
             cx,
         );
-        crate::panels::with_phase_3_component_proof(app, &theme, metrics, cx)
+        let app = crate::panels::with_phase_3_component_proof(app, &theme, metrics, cx);
+        let pending_consent = self.extension_runtime.pending_consent().cloned();
+        gpui::div()
+            .relative()
+            .size_full()
+            .child(app)
+            .when_some(pending_consent, |app, request| {
+                app.child(crate::extensions::consent_view::layer(
+                    &request,
+                    self.extension_consent_block_kind,
+                    &self.state,
+                    cx,
+                ))
+            })
     }
 }

@@ -1,0 +1,7 @@
+{
+  "name": "invalid-traversal",
+  "version": "1.0.0",
+  "muxy": {
+    "background": "../outside.js"
+  }
+}

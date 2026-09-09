@@ -74,7 +74,7 @@ if [[ "$PROFILE" == debug ]]; then
 fi
 plutil -lint "$INFO_PLIST" >/dev/null
 
-cargo_arguments=(build --package muxy --locked --target-dir "$PROJECT_ROOT/target")
+cargo_arguments=(build --package muxy --package muxy-extension-host --locked --target-dir "$PROJECT_ROOT/target")
 if [[ "$PROFILE" == "release" ]]; then
     cargo_arguments+=(--release)
 fi
@@ -97,6 +97,8 @@ trap cleanup EXIT
 mkdir -p "$STAGING_BUNDLE/Contents/MacOS" \
     "$STAGING_BUNDLE/Contents/Resources/Muxy_Muxy.bundle/scripts"
 install -m 0755 "$PROFILE_DIRECTORY/muxy" "$STAGING_BUNDLE/Contents/MacOS/muxy"
+install -m 0755 "$PROFILE_DIRECTORY/muxy-extension-host" \
+    "$STAGING_BUNDLE/Contents/MacOS/muxy-extension-host"
 install -m 0755 "$CLI_SOURCE" \
     "$STAGING_BUNDLE/Contents/Resources/Muxy_Muxy.bundle/scripts/muxy-cli"
 if [[ "$PROFILE" == debug ]]; then
@@ -157,6 +159,8 @@ elif [[ -e "$BUNDLED_DEVELOPMENT_CLI" ]]; then
 fi
 
 printf '==> Ad-hoc signing Muxy.app\n'
+codesign --force --sign - --timestamp=none \
+    "$STAGING_BUNDLE/Contents/MacOS/muxy-extension-host"
 codesign --force --sign - --timestamp=none "$STAGING_BUNDLE"
 "$SCRIPT_DIR/verify-bundle.sh" "$STAGING_BUNDLE" "$PROFILE"
 

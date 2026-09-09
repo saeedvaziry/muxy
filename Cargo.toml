@@ -5,6 +5,7 @@ members = [
     "crates/ghostty-host",
     "crates/muxy",
     "crates/muxy-core",
+    "crates/muxy-extension-host",
     "crates/muxy-proto",
     "crates/muxy-terminal",
     "crates/muxy-ui",
@@ -28,6 +29,7 @@ gpui = "=0.2.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 plist = "1"
+sha2 = "0.10"
 anyhow = "1"
 rust-embed = "8"
 image = "0.25"
@@ -45,7 +47,29 @@ raw-window-handle = "0.6"
 tempfile = "3"
 thiserror = "2"
 uuid = { version = "1", default-features = false, features = ["v4"] }
+time = { version = "0.3", features = ["formatting"] }
+url = "2"
+percent-encoding = "2"
 objc2 = "0.6"
+objc2-javascript-core = "0.3.2"
+objc2-web-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "block2",
+    "objc2-app-kit",
+    "objc2-core-foundation",
+    "WKContentWorld",
+    "WKNavigation",
+    "WKNavigationAction",
+    "WKNavigationDelegate",
+    "WKScriptMessage",
+    "WKScriptMessageHandlerWithReply",
+    "WKURLSchemeHandler",
+    "WKURLSchemeTask",
+    "WKUserContentController",
+    "WKUserScript",
+    "WKWebView",
+    "WKWebViewConfiguration",
+] }
 objc2-core-foundation = { version = "0.3", features = ["CFMachPort", "CFRunLoop"] }
 objc2-core-graphics = { version = "0.3", features = ["CGEvent", "CGEventTypes", "CGRemoteOperation"] }
 objc2-core-text = "0.3"
@@ -57,8 +81,14 @@ objc2-quartz-core = { version = "0.3", features = [
 objc2-foundation = { version = "0.3", features = [
     "NSArray",
     "NSData",
+    "NSError",
+    "NSJSONSerialization",
     "NSGeometry",
     "NSString",
+    "NSURL",
+    "NSURLRequest",
+    "NSURLResponse",
+    "NSURLError",
     "NSValue",
     "NSUserDefaults",
     "NSDictionary",

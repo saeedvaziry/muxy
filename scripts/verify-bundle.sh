@@ -28,6 +28,7 @@ readonly CONTENTS="$APP_BUNDLE/Contents"
 readonly PLIST="$CONTENTS/Info.plist"
 readonly RESOURCES="$CONTENTS/Resources"
 readonly EXECUTABLE="$CONTENTS/MacOS/muxy"
+readonly EXTENSION_HOST="$CONTENTS/MacOS/muxy-extension-host"
 readonly ICON="$RESOURCES/AppIcon.icns"
 readonly CLI_SOURCE="$PROJECT_ROOT/Muxy/Resources/scripts/muxy-cli"
 readonly BUNDLED_CLI="$RESOURCES/Muxy_Muxy.bundle/scripts/muxy-cli"
@@ -36,6 +37,9 @@ readonly BUNDLED_DEVELOPMENT_CLI="$RESOURCES/muxy-dev-bin/muxy"
 
 [[ -d "$APP_BUNDLE" ]] || fail "app bundle not found: $APP_BUNDLE"
 [[ -x "$EXECUTABLE" ]] || fail "bundle executable is missing or not executable"
+[[ -x "$EXTENSION_HOST" && -s "$EXTENSION_HOST" ]] || {
+    fail "extension host is missing or not executable"
+}
 [[ -f "$PLIST" ]] || fail "Info.plist is missing"
 [[ -s "$ICON" ]] || fail "AppIcon.icns is missing or empty"
 [[ -x "$BUNDLED_CLI" && -s "$BUNDLED_CLI" ]] || {
@@ -140,6 +144,11 @@ for icon_name in \
     }
 done
 
+codesign --verify --strict --verbose=2 "$EXTENSION_HOST"
+extension_host_signature="$(codesign --display --verbose=4 "$EXTENSION_HOST" 2>&1)"
+grep -q '^Signature=adhoc$' <<<"$extension_host_signature" || {
+    fail "extension host signature is not ad-hoc"
+}
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 signature_details="$(codesign --display --verbose=4 "$APP_BUNDLE" 2>&1)"
 grep -q '^Signature=adhoc$' <<<"$signature_details" || fail "bundle signature is not ad-hoc"

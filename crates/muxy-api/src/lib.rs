@@ -1,4 +1,5 @@
 pub mod execution_environment;
+pub mod extensions;
 pub mod git;
 pub mod ide;
 pub mod layouts;

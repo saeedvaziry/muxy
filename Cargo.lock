@@ -3257,6 +3257,7 @@ dependencies = [
  "ghostty-host",
  "gpui",
  "image",
+ "libc",
  "log",
  "muxy-api",
  "muxy-core",
@@ -3270,6 +3271,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-quartz-core",
  "objc2-user-notifications",
+ "objc2-web-kit",
  "raw-window-handle",
  "rfd",
  "rust-embed",
@@ -3283,6 +3285,7 @@ name = "muxy-api"
 version = "0.1.0"
 dependencies = [
  "async-channel 2.5.0",
+ "base64",
  "libc",
  "log",
  "muxy-core",
@@ -3292,6 +3295,9 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.20",
+ "time",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -3303,10 +3309,31 @@ dependencies = [
  "log",
  "objc2",
  "objc2-foundation",
+ "percent-encoding",
+ "plist",
  "resvg",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
+ "thiserror 2.0.20",
+ "unicode-segmentation",
+ "url",
+]
+
+[[package]]
+name = "muxy-extension-host"
+version = "0.1.0"
+dependencies = [
+ "async-channel 2.5.0",
+ "base64",
+ "libc",
+ "muxy-core",
+ "muxy-proto",
+ "objc2-javascript-core",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -3775,6 +3802,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-javascript-core"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a1e6550c4caed348956ce3370c9ffeca70bb1dbed4fa96112e7c6170e074586"
+dependencies = [
+ "block2",
+ "objc2",
+ "objc2-core-foundation",
+ "objc2-foundation",
+]
+
+[[package]]
 name = "objc2-metal"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3825,6 +3864,20 @@ dependencies = [
  "bitflags 2.13.1",
  "block2",
  "objc2",
+ "objc2-foundation",
+]
+
+[[package]]
+name = "objc2-web-kit"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2e5aaab980c433cf470df9d7af96a7b46a9d892d521a2cbbb2f8a4c16751e7f"
+dependencies = [
+ "bitflags 2.13.1",
+ "block2",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
  "objc2-foundation",
 ]
 

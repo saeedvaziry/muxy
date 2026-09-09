@@ -88,7 +88,7 @@ fn notification_sound_event(name: &str) -> Option<SettingsEvent> {
         .then(|| SettingsEvent::PreviewNotificationSound(name.to_owned()))
 }
 
-const CHROME_KEYS: [&str; 11] = [
+const CHROME_KEYS: [&str; 13] = [
     "muxy.showStatusBar",
     "muxy.showTopBarActions",
     "muxy.showProjectSearch",
@@ -100,7 +100,15 @@ const CHROME_KEYS: [&str; 11] = [
     "muxy.projectSortMode",
     "muxy.projects.keepOpenWhenNoTabs",
     "muxy.projectPicker.defaultDirectory",
+    "muxy.activeSidebar",
+    "muxy.defaultFileOpener",
 ];
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ExtensionSettingsOptions {
+    pub sidebars: Vec<(String, String)>,
+    pub file_openers: Vec<(String, String)>,
+}
 
 #[derive(Clone, Copy)]
 pub struct SliderSpec {
@@ -168,6 +176,7 @@ pub struct SettingsModal {
     desktop_authorization_pending: bool,
     quick_terminal_recording: Option<crate::quick_terminal::ShortcutRecording>,
     quick_terminal_recording_generation: u64,
+    extension_options: ExtensionSettingsOptions,
     errors: HashMap<String, String>,
     json_error: Option<String>,
     json_status: Option<String>,
@@ -189,6 +198,7 @@ impl SettingsModal {
         theme: Theme,
         metrics: Metrics,
         appearance: Appearance,
+        extension_options: ExtensionSettingsOptions,
         cx: &mut Context<Self>,
     ) -> Self {
         let style = InputStyle::field(&theme, &metrics);
@@ -241,6 +251,7 @@ impl SettingsModal {
             desktop_authorization_pending: false,
             quick_terminal_recording: None,
             quick_terminal_recording_generation: 0,
+            extension_options,
             errors: HashMap::new(),
             json_error: None,
             json_status: None,
@@ -255,6 +266,10 @@ impl SettingsModal {
             theme: &self.theme,
             metrics: &self.metrics,
         }
+    }
+
+    pub fn extension_options(&self) -> &ExtensionSettingsOptions {
+        &self.extension_options
     }
 
     pub fn set_appearance(&mut self, theme: Theme, metrics: Metrics, cx: &mut Context<Self>) {

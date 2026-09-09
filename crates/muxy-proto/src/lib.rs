@@ -1,3 +1,4 @@
+pub mod client;
 pub mod extension;
 pub mod framing;
 pub mod hook;

@@ -80,6 +80,27 @@ impl ExtensionBroadcast {
         }
         line
     }
+
+    pub fn parse(line: &str) -> Option<Self> {
+        let mut parts = line.split('|');
+        if parts.next()? != EXTENSION_BROADCAST_HEAD {
+            return None;
+        }
+        let name = parts.next()?.to_owned();
+        if name.is_empty() {
+            return None;
+        }
+        let mut payload = BTreeMap::new();
+        for segment in parts {
+            let Some((key, value)) = segment.split_once('=') else {
+                continue;
+            };
+            if !key.is_empty() {
+                payload.insert(key.to_owned(), value.to_owned());
+            }
+        }
+        Some(Self { name, payload })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -219,6 +240,18 @@ pub struct InvokeResult {
 }
 
 impl InvokeResult {
+    pub fn encode(&self) -> Option<String> {
+        if self.call_id.is_empty() || self.call_id.contains('|') {
+            return None;
+        }
+        let status = if self.ok { "ok" } else { "err" };
+        Some(format!(
+            "{INVOKE_RESULT_HEAD}|{}|{status}|{}",
+            self.call_id,
+            STANDARD.encode(&self.body)
+        ))
+    }
+
     pub fn parse(line: &str) -> Option<Self> {
         let parts = line.splitn(4, '|').collect::<Vec<_>>();
         if parts.len() < 3 || parts[0] != INVOKE_RESULT_HEAD || parts[1].is_empty() {
@@ -346,10 +379,23 @@ mod tests {
                 ("a".to_owned(), "first".to_owned()),
             ]),
         };
+        let encoded = broadcast.encode();
         assert_eq!(
-            broadcast.encode(),
+            encoded,
             "event|sample.event|a=first|z__key=line one line two\r"
         );
+        assert_eq!(
+            ExtensionBroadcast::parse(&encoded),
+            Some(ExtensionBroadcast {
+                name: "sample.event".to_owned(),
+                payload: BTreeMap::from([
+                    ("a".to_owned(), "first".to_owned()),
+                    ("z__key".to_owned(), "line one line two\r".to_owned()),
+                ])
+            })
+        );
+        assert_eq!(ExtensionBroadcast::parse("event|"), None);
+        assert_eq!(ExtensionBroadcast::parse("other|name"), None);
     }
 
     #[test]
@@ -451,13 +497,18 @@ mod tests {
 
     #[test]
     fn invoke_results_match_status_body_and_fallback_rules() {
+        let result = InvokeResult {
+            call_id: "CALL".to_owned(),
+            ok: true,
+            body: b"abc".to_vec(),
+        };
+        assert_eq!(
+            result.encode().as_deref(),
+            Some("invoke-result|CALL|ok|YWJj")
+        );
         assert_eq!(
             InvokeResult::parse("invoke-result|CALL|ok|YWJj").unwrap(),
-            InvokeResult {
-                call_id: "CALL".to_owned(),
-                ok: true,
-                body: b"abc".to_vec()
-            }
+            result
         );
         assert_eq!(
             InvokeResult::parse("invoke-result|CALL|ok").unwrap().body,

@@ -1,0 +1,259 @@
+{
+  "name": "full-root",
+  "version": "1.16.0",
+  "enabled": false,
+  "scripts": {
+    "build": "vite build"
+  },
+  "muxy": {
+    "description": "Complete compatibility fixture",
+    "background": "background.js",
+    "events": [
+      "pane.created",
+      "pane.closed",
+      "pane.focused",
+      "worktree.offline",
+      "tab.created",
+      "tab.updated",
+      "tab.closed",
+      "tab.focused",
+      "panel.opened",
+      "panel.closed",
+      "popover.opened",
+      "popover.closed",
+      "modal.opened",
+      "modal.closed",
+      "project.switched",
+      "projects.changed",
+      "worktree.switched",
+      "worktree.headChanged",
+      "notification.posted",
+      "file.changed",
+      "agent.status"
+    ],
+    "commands": [
+      {
+        "id": "event",
+        "title": "Event",
+        "subtitle": "Default action",
+        "defaultShortcut": "cmd+shift+e"
+      },
+      {
+        "id": "open-tab",
+        "title": "Open tab",
+        "action": {
+          "kind": "openTab",
+          "tabType": "editor",
+          "data": {
+            "path": "README.md"
+          }
+        }
+      },
+      {
+        "id": "toggle-panel",
+        "title": "Toggle panel",
+        "action": {
+          "kind": "togglePanel",
+          "panel": "dashboard"
+        }
+      },
+      {
+        "id": "open-popover",
+        "title": "Open popover",
+        "action": {
+          "kind": "openPopover",
+          "popover": "usage"
+        }
+      },
+      {
+        "id": "open-modal",
+        "title": "Open modal",
+        "action": {
+          "kind": "openModal",
+          "entry": "modal.html",
+          "width": 460,
+          "height": 300,
+          "dismissOnOutsideClick": false,
+          "data": {
+            "source": "fixture"
+          }
+        }
+      },
+      {
+        "id": "run-script",
+        "title": "Run script",
+        "action": {
+          "kind": "runScript",
+          "script": "script.js"
+        }
+      }
+    ],
+    "tabTypes": [
+      {
+        "id": "editor",
+        "title": "Editor",
+        "entry": "editor.html",
+        "defaultData": {
+          "readonly": false
+        }
+      }
+    ],
+    "homeViews": [
+      {
+        "id": "overview",
+        "title": "Overview",
+        "icon": {
+          "svg": "assets/overview.svg"
+        },
+        "entry": "home.html",
+        "defaultData": {
+          "showIdle": false
+        }
+      }
+    ],
+    "panels": [
+      {
+        "id": "dashboard",
+        "title": "Dashboard",
+        "icon": "sidebar.right",
+        "entry": "panel.html",
+        "position": "bottom",
+        "mode": "pinned",
+        "hiddenControls": [
+          "position"
+        ],
+        "headerButtons": [
+          {
+            "id": "refresh",
+            "icon": {
+              "svg": "assets/refresh.svg"
+            },
+            "tooltip": "Refresh",
+            "command": "event"
+          }
+        ],
+        "hideTopbar": true,
+        "defaultData": {
+          "scope": "active"
+        }
+      }
+    ],
+    "popovers": [
+      {
+        "id": "usage",
+        "title": "Usage",
+        "entry": "popover.html",
+        "width": 280,
+        "height": 200,
+        "defaultData": {
+          "period": "week"
+        }
+      }
+    ],
+    "sidebar": {
+      "id": "main",
+      "title": "Main",
+      "icon": "sparkles",
+      "entry": "sidebar.html",
+      "defaultData": {
+        "compact": true
+      }
+    },
+    "fileOpeners": [
+      {
+        "id": "source",
+        "title": "Source editor",
+        "tabType": "editor",
+        "patterns": [
+          "*.rs",
+          "*.swift"
+        ],
+        "singleton": false
+      }
+    ],
+    "localizations": [
+      {
+        "id": "de",
+        "language": "de",
+        "title": "Deutsch",
+        "bundle": "localization/German.bundle"
+      }
+    ],
+    "permissions": [
+      "panes:read",
+      "panes:write",
+      "tabs:read",
+      "tabs:write",
+      "browser:read",
+      "browser:write",
+      "projects:read",
+      "projects:write",
+      "projects:delete",
+      "worktrees:read",
+      "worktrees:write",
+      "agents:read",
+      "git:read",
+      "git:write",
+      "files:read",
+      "files:write",
+      "storage:read",
+      "storage:write",
+      "notifications:write",
+      "panels:write",
+      "commands:run-script",
+      "commands:exec",
+      "shortcuts:register",
+      "remote:serve",
+      "gh:read"
+    ],
+    "topbarItems": [
+      {
+        "id": "top",
+        "icon": {
+          "svg": "assets/top.svg"
+        },
+        "tooltip": "Top",
+        "command": "event",
+        "visible": false
+      }
+    ],
+    "statusBarItems": [
+      {
+        "id": "status",
+        "icon": "hammer",
+        "text": "Ready",
+        "tooltip": "Build status",
+        "side": "right",
+        "command": "event",
+        "visible": false
+      }
+    ],
+    "settings": [
+      {
+        "key": "endpoint",
+        "title": "Endpoint",
+        "description": "Service endpoint",
+        "type": "string",
+        "defaultValue": "https://example.com"
+      },
+      {
+        "key": "enabled",
+        "title": "Enabled",
+        "type": "bool",
+        "defaultValue": true
+      },
+      {
+        "key": "limit",
+        "title": "Limit",
+        "type": "number",
+        "defaultValue": 10
+      }
+    ],
+    "remoteMethods": [
+      {
+        "id": "forecast",
+        "description": "Get forecast"
+      }
+    ]
+  }
+}

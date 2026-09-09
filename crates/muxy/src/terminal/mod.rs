@@ -29,7 +29,9 @@ pub(crate) enum SurfaceIdentity {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RoutedTerminalEvent {
     Workspace(muxy_core::workspace::TabId, SurfaceSignal),
+    WorkspaceOpenUrl(muxy_core::workspace::TabId, String),
     Standalone(SurfaceSignal),
+    StandaloneOpenUrl(String),
 }
 
 impl SurfaceIdentity {
@@ -37,6 +39,13 @@ impl SurfaceIdentity {
         match self {
             Self::Workspace(tab_id) => RoutedTerminalEvent::Workspace(tab_id.clone(), signal),
             Self::Standalone => RoutedTerminalEvent::Standalone(signal),
+        }
+    }
+
+    pub(crate) fn route_open_url(&self, url: String) -> RoutedTerminalEvent {
+        match self {
+            Self::Workspace(tab_id) => RoutedTerminalEvent::WorkspaceOpenUrl(tab_id.clone(), url),
+            Self::Standalone => RoutedTerminalEvent::StandaloneOpenUrl(url),
         }
     }
 }

@@ -1,9 +1,16 @@
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use gpui::{Context, Task};
+use muxy_api::extensions::{
+    ConsentChoice, ConsentGate, ConsentResolution, DispatchOutcome, ExtensionApiDispatcher,
+    ExtensionApiError, PROMPT_TIMEOUT, decode_extension_socket_request,
+    encode_extension_socket_result, gated_verb_name,
+};
+use muxy_core::extensions::state::ExtensionGrantDecision;
 use muxy_proto::server::{
-    CommandReply, ExtensionSnapshot, IncomingRequest, ServerConfig, ServerError, ServerLimits,
-    SocketServer, SocketServerHandle,
+    CommandReply, CommandResponder, ExtensionSnapshot, IncomingRequest, ServerConfig, ServerError,
+    ServerLimits, SocketServer, SocketServerHandle,
 };
 
 use crate::socket::catalog;
@@ -27,7 +34,10 @@ pub struct SocketRuntime {
     _pump: Task<()>,
 }
 
-pub fn start(socket_path: PathBuf) -> Result<SocketBootstrap, ServerError> {
+pub fn start(
+    socket_path: PathBuf,
+    initial_extension_snapshot: ExtensionSnapshot,
+) -> Result<SocketBootstrap, ServerError> {
     let config = ServerConfig {
         socket_path: socket_path.clone(),
         recognized_command_heads: catalog::recognized_command_heads(),
@@ -36,7 +46,7 @@ pub fn start(socket_path: PathBuf) -> Result<SocketBootstrap, ServerError> {
             .map(str::to_owned)
             .collect(),
         limits: ServerLimits::default(),
-        initial_extension_snapshot: ExtensionSnapshot::default(),
+        initial_extension_snapshot,
     };
     let (server, handle, incoming) = SocketServer::start(config)?;
     Ok(SocketBootstrap {
@@ -50,6 +60,10 @@ pub fn start(socket_path: PathBuf) -> Result<SocketBootstrap, ServerError> {
 impl SocketBootstrap {
     pub fn socket_path(&self) -> &std::path::Path {
         &self.socket_path
+    }
+
+    pub fn handle(&self) -> SocketServerHandle {
+        self.handle.clone()
     }
 }
 
@@ -79,6 +93,20 @@ impl MainWindow {
     fn handle_socket_request(&mut self, request: IncomingRequest, cx: &mut Context<Self>) {
         match request {
             IncomingRequest::AppCommand(request) => {
+                let head = request.command.split('|').next().unwrap_or_default();
+                if let Some(extension_id) = request.origin.extension_id.clone()
+                    && (catalog::P9_BROWSER_HEADS.contains(&head)
+                        || catalog::P10_EXTENSION_API_HEADS.contains(&head))
+                {
+                    self.dispatch_extension_socket_api(
+                        &extension_id,
+                        request.origin.granted_permissions.clone(),
+                        &request.command,
+                        request.responder,
+                        cx,
+                    );
+                    return;
+                }
                 if request.origin.extension_id.is_some()
                     && let Some(permission) = catalog::denied_permission(
                         &request.command,
@@ -91,7 +119,6 @@ impl MainWindow {
                     return;
                 }
                 let parts: Vec<&str> = request.command.split('|').collect();
-                let head = parts.first().copied().unwrap_or_default();
                 if let Some(command) = panes::handle(head, &parts, self) {
                     match command {
                         PaneCommand::Immediate(result) => {
@@ -211,8 +238,225 @@ impl MainWindow {
                 }
             }
             IncomingRequest::ExtensionLocalEvent(event) => {
+                self.extension_runtime.route_local_event(event.clone());
                 self.state.socket_ingress.push_extension_event(event);
             }
+        }
+    }
+
+    fn dispatch_extension_socket_api(
+        &mut self,
+        extension_id: &str,
+        granted_permissions: BTreeSet<String>,
+        command: &str,
+        responder: CommandResponder,
+        cx: &mut Context<Self>,
+    ) {
+        let decoded =
+            match decode_extension_socket_request(extension_id, granted_permissions, command) {
+                Ok(decoded) => decoded,
+                Err(error) => {
+                    responder.respond(CommandReply::new(format!("error:{error}")));
+                    return;
+                }
+            };
+        let method = decoded.request.method.clone();
+        let reply_kind = decoded.reply_kind;
+        self.dispatch_extension_api_request(
+            decoded.request,
+            Box::new(move |result| {
+                responder.respond(CommandReply::new(encode_extension_socket_result(
+                    &method, reply_kind, result,
+                )));
+            }),
+            cx,
+        );
+    }
+
+    pub(crate) fn dispatch_extension_api_request(
+        &mut self,
+        request: muxy_api::extensions::ExtensionApiRequest,
+        completion: crate::extensions::ExtensionApiCompletion,
+        cx: &mut Context<Self>,
+    ) {
+        let display_name = crate::extensions::api::extension_display_name(
+            &self.extension_runtime,
+            &request.extension_id,
+        );
+        let outcome = {
+            let mut effects = Vec::new();
+            let mut service = crate::extensions::api::AppExtensionApiService::with_app(
+                &mut self.extension_runtime,
+                &self.state,
+                &self.extension_surfaces,
+                &mut effects,
+            );
+            let outcome = ExtensionApiDispatcher::dispatch(request, &display_name, &mut service);
+            drop(service);
+            self.apply_extension_app_effects(effects, cx);
+            outcome
+        };
+        match outcome {
+            DispatchOutcome::Complete(result) => completion(result),
+            DispatchOutcome::Deferred { request, group } => {
+                self.dispatch_deferred_extension_request(request, group, completion, cx);
+            }
+            DispatchOutcome::ConsentRequired { request, consent } => {
+                let verb = gated_verb_name(consent.verb).to_owned();
+                match self.extension_runtime.gate_consent(*consent) {
+                    ConsentGate::Allow { .. } => {
+                        self.dispatch_authorized_extension_request(request, completion, cx);
+                    }
+                    ConsentGate::Deny { .. } => {
+                        completion(Err(ExtensionApiError::ConsentDenied(verb)));
+                    }
+                    ConsentGate::Pending { request_id, active } => {
+                        self.pending_extension_api
+                            .insert(request_id.clone(), request, completion);
+                        if active {
+                            self.extension_consent_block_kind = false;
+                            cx.activate(true);
+                            cx.notify();
+                        }
+                        cx.spawn(async move |window, cx| {
+                            cx.background_executor().timer(PROMPT_TIMEOUT).await;
+                            let _ = window.update(cx, |window, cx| {
+                                window.expire_extension_consents(cx);
+                            });
+                        })
+                        .detach();
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn toggle_extension_consent_block_kind(&mut self, cx: &mut Context<Self>) {
+        self.extension_consent_block_kind = !self.extension_consent_block_kind;
+        cx.notify();
+    }
+
+    pub(crate) fn resolve_extension_consent(
+        &mut self,
+        mut choice: ConsentChoice,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(request_id) = self
+            .extension_runtime
+            .pending_consent()
+            .map(|request| request.id.clone())
+        else {
+            return;
+        };
+        if self.extension_consent_block_kind {
+            choice = match choice {
+                ConsentChoice::DenyAndRemember => ConsentChoice::BlockKind,
+                ConsentChoice::AllowAndRemember | ConsentChoice::AllowOnce => return,
+                choice => choice,
+            };
+        }
+        match self
+            .extension_runtime
+            .respond_to_consent(&request_id, choice)
+        {
+            Ok(Some(resolution)) => self.finish_extension_consent(resolution, Some(cx)),
+            Ok(None) => {}
+            Err(error) => {
+                if let Some(call) = self.pending_extension_api.remove(&request_id) {
+                    call.complete(Err(ExtensionApiError::ConsentPersistence(error)));
+                }
+            }
+        }
+        self.extension_consent_block_kind = false;
+        cx.notify();
+    }
+
+    fn expire_extension_consents(&mut self, cx: &mut Context<Self>) {
+        let resolutions = self.extension_runtime.expire_consents();
+        if resolutions.is_empty() {
+            return;
+        }
+        for resolution in resolutions {
+            self.finish_extension_consent(resolution, Some(cx));
+        }
+        self.extension_consent_block_kind = false;
+        cx.notify();
+    }
+
+    pub(crate) fn cancel_extension_api_calls(&mut self, extension_id: &str) {
+        for resolution in self
+            .extension_runtime
+            .cancel_consents_for_extension(extension_id)
+        {
+            self.finish_extension_consent(resolution, None);
+        }
+    }
+
+    pub(crate) fn cancel_all_extension_api_calls(&mut self) {
+        let extension_ids = self.pending_extension_api.extension_ids();
+        for extension_id in extension_ids {
+            self.cancel_extension_api_calls(&extension_id);
+        }
+        for resolution in self.extension_runtime.cancel_all_consents() {
+            self.finish_extension_consent(resolution, None);
+        }
+        for call in self.pending_extension_api.drain() {
+            let method = call.request.method.clone();
+            call.complete(Err(ExtensionApiError::ConsentDenied(method)));
+        }
+        self.extension_consent_block_kind = false;
+    }
+
+    fn finish_extension_consent(
+        &mut self,
+        resolution: ConsentResolution,
+        cx: Option<&mut Context<Self>>,
+    ) {
+        let Some(call) = self.pending_extension_api.remove(&resolution.request.id) else {
+            return;
+        };
+        if resolution.decision == ExtensionGrantDecision::Allow {
+            match cx {
+                Some(cx) => {
+                    let (request, completion) = call.into_parts();
+                    self.dispatch_authorized_extension_request(request, completion, cx);
+                }
+                None => call.complete(Err(ExtensionApiError::Service(
+                    "authorized request lost its application context".to_owned(),
+                ))),
+            }
+        } else {
+            call.complete(Err(ExtensionApiError::ConsentDenied(
+                gated_verb_name(resolution.request.verb).to_owned(),
+            )));
+        }
+    }
+
+    fn dispatch_authorized_extension_request(
+        &mut self,
+        request: muxy_api::extensions::ExtensionApiRequest,
+        completion: crate::extensions::ExtensionApiCompletion,
+        cx: &mut Context<Self>,
+    ) {
+        let mut effects = Vec::new();
+        let outcome = {
+            let mut service = crate::extensions::api::AppExtensionApiService::with_app(
+                &mut self.extension_runtime,
+                &self.state,
+                &self.extension_surfaces,
+                &mut effects,
+            );
+            ExtensionApiDispatcher::dispatch_authorized(request, &mut service)
+        };
+        self.apply_extension_app_effects(effects, cx);
+        match outcome {
+            DispatchOutcome::Complete(result) => completion(result),
+            DispatchOutcome::Deferred { request, group } => {
+                self.dispatch_deferred_extension_request(request, group, completion, cx);
+            }
+            DispatchOutcome::ConsentRequired { .. } => completion(Err(ExtensionApiError::Service(
+                "authorized extension request unexpectedly required consent".to_owned(),
+            ))),
         }
     }
 

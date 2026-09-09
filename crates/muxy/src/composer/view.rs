@@ -463,6 +463,7 @@ fn attachment_rows(
 
 pub fn render(
     controller: &ComposerController,
+    panels: &crate::panels::PanelRuntime,
     preferences: &ComposerPreferences,
     shortcuts: &ShortcutMap,
     style: PanelStyle,
@@ -472,15 +473,16 @@ pub fn render(
 ) -> Option<RenderedComposerPanel> {
     let theme = &style.theme;
     let metrics = style.metrics;
-    let placement = controller.placement()?.clone();
+    let placement = panels
+        .host()
+        .placement(&PanelId::from(muxy_core::composer::PANEL_ID))?
+        .clone();
     let merge_footer = merge_footer
         && placement.position == PanelPosition::Bottom
         && placement.mode == PanelMode::Pinned;
     let input = controller.input()?.clone();
     let dimension = panel_dimension(preferences);
-    let resize_state = controller
-        .panels()
-        .resize_state(&PanelId::from(muxy_core::composer::PANEL_ID))?;
+    let resize_state = panels.resize_state(&PanelId::from(muxy_core::composer::PANEL_ID))?;
     let view = cx.weak_entity();
     let move_action = PanelAction::icon(
         "composer-move",

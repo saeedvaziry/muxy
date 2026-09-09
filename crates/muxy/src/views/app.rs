@@ -63,7 +63,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, Bounds, Context, Entity, FocusHandle, InteractiveElement, IntoElement, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection, ParentElement, Pixels,
-    Styled, Window, actions, div, px, relative,
+    Point, Styled, Window, actions, div, px, relative,
 };
 use muxy_ui::scrollbar::ScrollbarRevealState;
 use muxy_ui::text_input::TextInput;
@@ -94,6 +94,9 @@ pub(crate) struct AppView<'a> {
     pub workspace_focus: &'a FocusHandle,
     pub menu_focus: &'a FocusHandle,
     pub terminals: &'a TerminalSurfaces,
+    pub extension_webviews: &'a crate::extensions::webview::ExtensionWebViewRegistry,
+    pub extension_surfaces: &'a crate::extensions::surfaces::ExtensionSurfaceRegistry,
+    pub extension_popover_anchor: Option<Point<Pixels>>,
     pub area_bounds: &'a HashMap<String, Bounds<Pixels>>,
     pub search_inputs: &'a HashMap<String, Entity<TextInput>>,
     pub scrollbar_reveal: &'a HashMap<String, ScrollbarRevealState>,
@@ -107,6 +110,9 @@ pub(crate) struct AppView<'a> {
     pub focused_working_directory: Option<String>,
     pub expanded_worktree_projects: &'a HashSet<String>,
     pub composer: &'a crate::composer::ComposerController,
+    pub panels: &'a crate::panels::PanelRuntime,
+    pub extension_topbar_items: &'a [crate::extensions::ExtensionTopbarBinding],
+    pub extension_statusbar_items: &'a [crate::extensions::ExtensionStatusBarBinding],
 }
 
 pub(crate) fn render(
@@ -123,6 +129,9 @@ pub(crate) fn render(
         workspace_focus,
         menu_focus,
         terminals,
+        extension_webviews,
+        extension_surfaces,
+        extension_popover_anchor,
         area_bounds,
         search_inputs,
         scrollbar_reveal,
@@ -136,9 +145,18 @@ pub(crate) fn render(
         focused_working_directory,
         expanded_worktree_projects,
         composer,
+        panels,
+        extension_topbar_items,
+        extension_statusbar_items,
     } = view;
     let theme = state.theme.clone();
     let metrics = state.metrics;
+    let sidebar_content = extension_surfaces
+        .active_sidebar()
+        .and_then(|surface| extension_webviews.element(&surface.instance_id, true))
+        .unwrap_or_else(|| {
+            sidebar::sidebar(state, layout, expanded_worktree_projects, cx).into_any_element()
+        });
     let sidebar_column = div()
         .flex()
         .flex_col()
@@ -154,12 +172,7 @@ pub(crate) fn render(
                 .flex_col()
                 .flex_grow()
                 .min_h(px(0.0))
-                .child(sidebar::sidebar(
-                    state,
-                    layout,
-                    expanded_worktree_projects,
-                    cx,
-                )),
+                .child(sidebar_content),
         );
 
     let sidebar_border = div()
@@ -171,19 +184,30 @@ pub(crate) fn render(
         .bg(theme.border_solid());
 
     let tab_workspace = state.active_tab_workspace().cloned();
-    let composer_consumed_width = composer
-        .placement()
-        .filter(|placement| {
-            placement.mode == muxy_ui::panel::PanelMode::Pinned
-                && placement.position == muxy_ui::panel::PanelPosition::Right
+    let composer_id = muxy_ui::panel::PanelId::from(muxy_core::composer::PANEL_ID);
+    let composer_placement = panels.host().placement(&composer_id);
+    let pinned_right_slot = muxy_ui::panel::PanelSlot {
+        position: muxy_ui::panel::PanelPosition::Right,
+        mode: muxy_ui::panel::PanelMode::Pinned,
+    };
+    let consumed_width = panels
+        .host()
+        .occupant(pinned_right_slot)
+        .map(|panel_id| {
+            if panel_id == &composer_id {
+                state.prefs.composer.panel_width as f32
+            } else {
+                extension_surfaces
+                    .panel_dimension(panel_id.as_str())
+                    .unwrap_or(360.0) as f32
+            }
         })
-        .map(|_| state.prefs.composer.panel_width as f32)
         .unwrap_or(0.0);
-    let main_width = (f32::from(window.viewport_size().width - layout.sidebar_width)
-        - composer_consumed_width)
-        .max(0.0);
+    let main_width =
+        (f32::from(window.viewport_size().width - layout.sidebar_width) - consumed_width).max(0.0);
     let panes = workspace_view::Panes {
         terminals,
+        extension_webviews,
         area_bounds,
         search_inputs,
         reveal: scrollbar_reveal,
@@ -201,10 +225,17 @@ pub(crate) fn render(
             ) =>
         {
             workspace_view::titlebar_tab_strip(
-                state, layout, &panes, workspace, true, main_width, cx,
+                state,
+                layout,
+                &panes,
+                workspace,
+                true,
+                main_width,
+                extension_topbar_items,
+                cx,
             )
         }
-        _ => titlebar::main_titlebar(state, layout, cx),
+        _ => titlebar::main_titlebar(state, layout, extension_topbar_items, cx),
     };
     let content = match &tab_workspace {
         Some(workspace) if !shows_welcome(Some(workspace)) => {
@@ -213,9 +244,10 @@ pub(crate) fn render(
         _ => welcome::workspace_content(state, cx),
     };
     let merge_composer_footer =
-        merge_composer_footer_with_status_bar(state.prefs.show_status_bar, composer.placement());
+        merge_composer_footer_with_status_bar(state.prefs.show_status_bar, composer_placement);
     let composer_panel = crate::composer::view::render(
         composer,
+        panels,
         &state.prefs.composer,
         &state.shortcuts,
         muxy_ui::panel::PanelStyle::new(theme.clone(), metrics),
@@ -223,6 +255,28 @@ pub(crate) fn render(
         window,
         cx,
     );
+    let extension_panels = extension_surfaces
+        .active_panels()
+        .filter_map(|surface| {
+            let placement = panels
+                .host()
+                .placement(&muxy_ui::panel::PanelId::from(surface.instance_id.clone()))?
+                .clone();
+            let resize_state = panels.resize_state(&placement.id)?;
+            crate::extensions::surface_view::render_panel(
+                surface,
+                placement,
+                extension_surfaces
+                    .panel_dimension(&surface.instance_id)
+                    .unwrap_or(360.0),
+                resize_state,
+                extension_webviews,
+                &theme,
+                metrics,
+                cx,
+            )
+        })
+        .collect::<Vec<_>>();
     let repository_ai_menu_available = !repository_mutation_busy
         && matches!(
             repository_state.ai,
@@ -250,70 +304,109 @@ pub(crate) fn render(
             repository_mutation_busy,
             repository_ai_menu_available,
             None,
+            extension_statusbar_items,
             cx,
         ));
     }
-    let main_region = match composer_panel {
-        Some(panel)
-            if panel.placement.mode == muxy_ui::panel::PanelMode::Pinned
-                && panel.placement.position == muxy_ui::panel::PanelPosition::Right =>
-        {
+    let mut pinned_right = None;
+    let mut pinned_bottom = None;
+    let mut floating_right = None;
+    let mut floating_bottom = None;
+    let mut merged_footer = None;
+    if let Some(panel) = composer_panel {
+        let target = match (panel.placement.position, panel.placement.mode) {
+            (muxy_ui::panel::PanelPosition::Right, muxy_ui::panel::PanelMode::Pinned) => {
+                &mut pinned_right
+            }
+            (muxy_ui::panel::PanelPosition::Bottom, muxy_ui::panel::PanelMode::Pinned) => {
+                merged_footer = panel.merged_footer;
+                &mut pinned_bottom
+            }
+            (muxy_ui::panel::PanelPosition::Right, muxy_ui::panel::PanelMode::Floating) => {
+                &mut floating_right
+            }
+            (muxy_ui::panel::PanelPosition::Bottom, muxy_ui::panel::PanelMode::Floating) => {
+                &mut floating_bottom
+            }
+        };
+        *target = Some(panel.element);
+    }
+    for panel in extension_panels {
+        let target = match (panel.placement.position, panel.placement.mode) {
+            (muxy_ui::panel::PanelPosition::Right, muxy_ui::panel::PanelMode::Pinned) => {
+                &mut pinned_right
+            }
+            (muxy_ui::panel::PanelPosition::Bottom, muxy_ui::panel::PanelMode::Pinned) => {
+                &mut pinned_bottom
+            }
+            (muxy_ui::panel::PanelPosition::Right, muxy_ui::panel::PanelMode::Floating) => {
+                &mut floating_right
+            }
+            (muxy_ui::panel::PanelPosition::Bottom, muxy_ui::panel::PanelMode::Floating) => {
+                &mut floating_bottom
+            }
+        };
+        *target = Some(panel.element);
+    }
+    let mut main_region = div()
+        .relative()
+        .flex()
+        .flex_grow()
+        .min_w(px(0.0))
+        .min_h(px(0.0))
+        .h_full()
+        .child(main_column)
+        .when_some(pinned_right, |region, panel| {
             div()
                 .relative()
                 .flex()
                 .flex_row()
                 .flex_grow()
                 .min_w(px(0.0))
+                .min_h(px(0.0))
                 .h_full()
-                .child(main_column)
-                .child(panel.element)
-                .into_any_element()
-        }
-        Some(panel)
-            if panel.placement.mode == muxy_ui::panel::PanelMode::Pinned
-                && panel.placement.position == muxy_ui::panel::PanelPosition::Bottom =>
-        {
-            let merged_footer = panel.merged_footer;
-            div()
-                .relative()
-                .flex()
-                .flex_col()
-                .flex_grow()
-                .min_w(px(0.0))
-                .h_full()
-                .child(main_column)
-                .child(panel.element)
-                .when_some(merged_footer, |region, footer| {
-                    region.child(status_bar::status_bar(
-                        state,
-                        focused_working_directory.as_deref(),
-                        repository_controls,
-                        repository_mutation_busy,
-                        repository_ai_menu_available,
-                        Some(footer),
-                        cx,
-                    ))
-                })
-                .into_any_element()
-        }
-        Some(panel) => div()
+                .child(region)
+                .child(panel)
+        })
+        .into_any_element();
+    if let Some(panel) = pinned_bottom {
+        main_region = div()
+            .relative()
+            .flex()
+            .flex_col()
+            .flex_grow()
+            .min_w(px(0.0))
+            .min_h(px(0.0))
+            .h_full()
+            .child(main_region)
+            .child(panel)
+            .when_some(merged_footer, |region, footer| {
+                region.child(status_bar::status_bar(
+                    state,
+                    focused_working_directory.as_deref(),
+                    repository_controls,
+                    repository_mutation_busy,
+                    repository_ai_menu_available,
+                    Some(footer),
+                    extension_statusbar_items,
+                    cx,
+                ))
+            })
+            .into_any_element();
+    }
+    if floating_right.is_some() || floating_bottom.is_some() {
+        main_region = div()
             .relative()
             .flex()
             .flex_grow()
             .min_w(px(0.0))
+            .min_h(px(0.0))
             .h_full()
-            .child(main_column)
-            .child(panel.element)
-            .into_any_element(),
-        None => div()
-            .relative()
-            .flex()
-            .flex_grow()
-            .min_w(px(0.0))
-            .h_full()
-            .child(main_column)
-            .into_any_element(),
-    };
+            .child(main_region)
+            .when_some(floating_right, |region, panel| region.child(panel))
+            .when_some(floating_bottom, |region, panel| region.child(panel))
+            .into_any_element();
+    }
 
     let mut columns = div()
         .id("main-window")
@@ -429,6 +522,11 @@ pub(crate) fn render(
                     window_handle,
                     cx,
                 );
+            },
+        ))
+        .on_action(cx.listener(
+            |window, action: &crate::views::window::extensions::RunExtensionShortcut, _, cx| {
+                window.run_extension_command(&action.extension_id, &action.command_id, None, cx);
             },
         ))
         .on_action(cx.listener(
@@ -743,6 +841,31 @@ pub(crate) fn render(
             state.metrics,
             cx,
         ));
+    }
+
+    if let Some(popover) = extension_surfaces.active_popover()
+        && let Some(layer) = crate::extensions::surface_view::render_popover(
+            popover,
+            extension_popover_anchor,
+            extension_webviews,
+            &state.theme,
+            state.metrics,
+            cx,
+        )
+    {
+        columns = columns.child(layer);
+    }
+
+    if let Some(modal) = extension_surfaces.active_modal()
+        && let Some(layer) = crate::extensions::surface_view::render_modal(
+            modal,
+            extension_webviews,
+            &state.theme,
+            state.metrics,
+            cx,
+        )
+    {
+        columns = columns.child(layer);
     }
 
     columns.into_any_element()

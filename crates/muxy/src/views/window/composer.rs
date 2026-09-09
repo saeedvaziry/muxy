@@ -301,9 +301,9 @@ impl MainWindow {
             panel_position(self.state.prefs.composer.position),
             panel_mode(self.state.prefs.composer.panel_mode),
         );
+        self.place_panel(placement);
         let focus = input.focus_handle(cx);
-        self.composer
-            .open(target, input, attachments, subscription, placement);
+        self.composer.open(target, input, attachments, subscription);
         self.view.pending_focus = Some(focus);
         cx.notify();
     }
@@ -694,6 +694,9 @@ impl MainWindow {
             self.dismiss_overlay(cx);
         }
         self.composer.close();
+        self.panels.close(&muxy_ui::panel::PanelId::from(
+            muxy_core::composer::PANEL_ID,
+        ));
         true
     }
 
@@ -710,8 +713,11 @@ impl MainWindow {
 
     pub(crate) fn close_floating_composer_from_outside(&mut self, cx: &mut Context<Self>) {
         if self
-            .composer
-            .placement()
+            .panels
+            .host()
+            .placement(&muxy_ui::panel::PanelId::from(
+                muxy_core::composer::PANEL_ID,
+            ))
             .is_some_and(|placement| placement.mode == PanelMode::Floating)
         {
             self.close_composer(cx);
@@ -1063,20 +1069,22 @@ impl MainWindow {
     fn set_composer_position(&mut self, position: ComposerPanelPosition) -> std::io::Result<()> {
         ComposerPreferences::try_store_position(position)?;
         self.state.prefs.composer.position = position;
-        self.composer.place(
+        self.place_panel(PanelPlacement::new(
+            muxy_core::composer::PANEL_ID,
             panel_position(position),
             panel_mode(self.state.prefs.composer.panel_mode),
-        );
+        ));
         Ok(())
     }
 
     fn set_composer_panel_mode(&mut self, mode: ComposerPanelMode) -> std::io::Result<()> {
         ComposerPreferences::try_store_panel_mode(mode)?;
         self.state.prefs.composer.panel_mode = mode;
-        self.composer.place(
+        self.place_panel(PanelPlacement::new(
+            muxy_core::composer::PANEL_ID,
             panel_position(self.state.prefs.composer.position),
             panel_mode(mode),
-        );
+        ));
         Ok(())
     }
 

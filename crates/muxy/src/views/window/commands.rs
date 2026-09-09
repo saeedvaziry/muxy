@@ -365,6 +365,10 @@ impl MainWindow {
         cx.bind_keys(crate::keymap::command_bindings(
             &self.state.command_shortcuts,
         ));
+        cx.bind_keys(super::extensions::shortcut_bindings(
+            &self.extension_runtime,
+            &self.state,
+        ));
         cx.set_menus(menu_bar::menus(&self.state));
         self.terminal_runtime
             .surfaces

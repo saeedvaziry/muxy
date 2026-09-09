@@ -1,6 +1,9 @@
 mod commands;
 pub(crate) mod composer;
 mod dropped_paths;
+mod extension_tasks;
+mod extension_webviews;
+pub(crate) mod extensions;
 mod lifecycle;
 pub mod menu_bar;
 mod overlays;
@@ -123,9 +126,24 @@ use lifecycle::ProjectRuntime;
 use terminal::TerminalRuntime;
 use view_state::{ScrollbarDrag, ViewState, WorkspaceGesture};
 
+pub(crate) struct WindowRuntime {
+    socket: SocketBootstrap,
+    extensions: crate::extensions::ExtensionRuntime,
+}
+
+impl WindowRuntime {
+    pub(crate) fn new(
+        socket: SocketBootstrap,
+        extensions: crate::extensions::ExtensionRuntime,
+    ) -> Self {
+        Self { socket, extensions }
+    }
+}
+
 pub struct MainWindow {
     pub state: AppState,
     composer: crate::composer::ComposerController,
+    pub(crate) panels: crate::panels::PanelRuntime,
     composer_store: ComposerStore,
     composer_save_generation: u64,
     _composer_save_task: Option<Task<()>>,
@@ -135,16 +153,25 @@ pub struct MainWindow {
     pub(crate) notification_coordinator: crate::notifications::NotificationCoordinator,
     pub(crate) native_response_receiver: Option<async_channel::Receiver<String>>,
     project_runtime: ProjectRuntime,
+    pub(crate) extension_runtime: crate::extensions::ExtensionRuntime,
+    pub(crate) extension_surfaces: crate::extensions::surfaces::ExtensionSurfaceRegistry,
+    pub(crate) extension_webviews: crate::extensions::webview::ExtensionWebViewRegistry,
+    pub(crate) pending_extension_api: crate::extensions::PendingExtensionApiCalls,
+    pub(crate) extension_consent_block_kind: bool,
+    pub(crate) extension_popover_anchor: Option<Point<Pixels>>,
+    pub(crate) extension_modal_results: HashMap<String, serde_json::Value>,
     _socket_runtime: SocketRuntime,
+    _extension_process_pump: Task<()>,
+    _extension_webview_pump: Task<()>,
     _native_response_pump: Option<Task<()>>,
     _notification_authorization_probe: Option<Task<()>>,
     picker_search: muxy_api::picker::search::SearchService,
 }
 
 impl MainWindow {
-    pub fn new(
+    pub(crate) fn new(
         state: AppState,
-        socket: SocketBootstrap,
+        runtime: WindowRuntime,
         mode: muxy_core::environment::BuildMode,
         execution_environment: muxy_api::execution_environment::ExecutionEnvironmentSource,
         desktop_notifications: (
@@ -154,6 +181,10 @@ impl MainWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let WindowRuntime {
+            socket,
+            extensions: mut extension_runtime,
+        } = runtime;
         let menu_focus = cx.focus_handle();
         let workspace_focus = cx.focus_handle();
         let mut terminals = TerminalSurfaces::with_socket_path(socket.socket_path());
@@ -168,6 +199,25 @@ impl MainWindow {
             log::warn!("terminal backend unavailable: {error}");
         }
         let terminal_tasks = lifecycle::spawn_terminal_pumps(&mut terminals, cx);
+        let (extension_webviews, extension_webview_calls) =
+            crate::extensions::webview::ExtensionWebViewRegistry::new(&terminals);
+        let extension_webview_pump = cx.spawn(async move |window, cx| {
+            while let Ok(event) = extension_webview_calls.recv().await {
+                if window
+                    .update(cx, |window, cx| match event {
+                        crate::extensions::webview::ExtensionWebViewEvent::Api(call) => {
+                            window.dispatch_extension_webview_call(call, cx);
+                        }
+                        crate::extensions::webview::ExtensionWebViewEvent::FocusRequested {
+                            surface_id,
+                        } => window.focus_extension_webview(&surface_id, cx),
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        });
         let (watchers, watcher_events) = muxy_api::watcher::Watchers::new();
         let watcher_task = cx.spawn(async move |window, cx| {
             while let Ok(project_id) = watcher_events.recv().await {
@@ -233,11 +283,39 @@ impl MainWindow {
                 }
             }
         });
+        extension_runtime.bind_socket(socket.handle(), socket.socket_path().to_path_buf());
+        let extension_host_events = extension_runtime.host_events();
+        extension_runtime.start_all();
+        let extension_process_pump = cx.spawn(async move |window, cx| {
+            while let Ok(event) = extension_host_events.recv().await {
+                let restart = window
+                    .update(cx, |window, _| {
+                        window.extension_runtime.handle_host_exit(event)
+                    })
+                    .ok()
+                    .flatten();
+                let Some(restart) = restart else {
+                    continue;
+                };
+                cx.background_executor().timer(restart.delay).await;
+                if window
+                    .update(cx, |window, _| {
+                        window
+                            .extension_runtime
+                            .restart_if_due(&restart.extension_id);
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        });
         let socket_runtime = SocketRuntime::attach(socket, cx);
         let composer_store = crate::state::load_composer_store();
         let mut main_window = Self {
             state,
             composer: crate::composer::ComposerController::default(),
+            panels: crate::panels::PanelRuntime::default(),
             composer_store,
             composer_save_generation: 0,
             _composer_save_task: None,
@@ -252,7 +330,16 @@ impl MainWindow {
                 execution_environment,
                 environment_task,
             ),
+            extension_runtime,
+            extension_surfaces: crate::extensions::surfaces::ExtensionSurfaceRegistry::default(),
+            extension_webviews,
+            pending_extension_api: crate::extensions::PendingExtensionApiCalls::default(),
+            extension_consent_block_kind: false,
+            extension_popover_anchor: None,
+            extension_modal_results: HashMap::new(),
             _socket_runtime: socket_runtime,
+            _extension_process_pump: extension_process_pump,
+            _extension_webview_pump: extension_webview_pump,
             _native_response_pump: Some(native_response_pump),
             _notification_authorization_probe: None,
             picker_search: muxy_api::picker::search::SearchService::new(),
@@ -313,6 +400,10 @@ impl MainWindow {
             .detach();
         }
         main_window.refresh_project_truth(None, cx);
+        cx.bind_keys(extensions::shortcut_bindings(
+            &main_window.extension_runtime,
+            &main_window.state,
+        ));
         cx.set_menus(menu_bar::menus(&main_window.state));
         main_window
     }
@@ -577,6 +668,8 @@ impl MainWindow {
 
 impl Drop for MainWindow {
     fn drop(&mut self) {
+        self.cancel_all_extension_api_calls();
+        self.extension_runtime.shutdown();
         self.flush_notification_store();
         self.flush_composer_store();
     }

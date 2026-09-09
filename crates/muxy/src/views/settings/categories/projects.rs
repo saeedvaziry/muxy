@@ -57,7 +57,12 @@ pub(super) fn content(modal: &SettingsModal, cx: &mut Context<SettingsModal>) ->
     ));
 
     let opener = settings::string_value(FILE_OPENER, "");
-    let opener_footer = if opener.is_empty() {
+    let opener_available = modal
+        .extension_options()
+        .file_openers
+        .iter()
+        .any(|(value, _)| value == &opener);
+    let opener_footer = if opener.is_empty() || opener_available {
         "Terminal file links use this opener. Built-in and unmatched extension files use the project target selected separately in the top bar."
     } else {
         "The selected extension opener is unavailable, so terminal file links currently use the project target selected separately in the top bar."
@@ -74,7 +79,16 @@ pub(super) fn content(modal: &SettingsModal, cx: &mut Context<SettingsModal>) ->
             FILE_OPENER,
             "",
             appended_stored(
-                vec![Choice::new("", "Built-in (Top Bar Project Target)")],
+                std::iter::once(Choice::new("", "Built-in (Top Bar Project Target)"))
+                    .chain(
+                        modal
+                            .extension_options()
+                            .file_openers
+                            .iter()
+                            .cloned()
+                            .map(|(value, label)| Choice::new(value, label)),
+                    )
+                    .collect(),
                 &opener,
                 unavailable_label(&opener, "Unavailable Extension Opener"),
             ),

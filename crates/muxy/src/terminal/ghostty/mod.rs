@@ -355,6 +355,10 @@ impl GhosttyBackend {
         Ok(())
     }
 
+    pub(crate) fn compositor(&self) -> Option<NativeViewCompositor> {
+        self.compositor.clone()
+    }
+
     pub fn set_shortcut_combos(&mut self, combos: Vec<KeyCombo>) {
         self.gate = Rc::new(ShortcutGate::new(combos));
         for surface in self.surfaces.borrow().values() {
@@ -552,7 +556,7 @@ impl GhosttyBackend {
     fn route_action(
         &mut self,
         event: ghostty_host::ActionEvent,
-        cx: &mut App,
+        _cx: &mut App,
     ) -> Option<RoutedTerminalEvent> {
         if matches!(&event.action, RuntimeAction::ReloadConfig { .. }) {
             self.reload_config();
@@ -605,7 +609,9 @@ impl GhosttyBackend {
             RuntimeAction::MouseVisibility(visibility) => {
                 surface.host.apply_runtime_mouse_visibility(*visibility);
             }
-            RuntimeAction::OpenUrl(open) if !open.url.is_empty() => cx.open_url(&open.url),
+            RuntimeAction::OpenUrl(open) if !open.url.is_empty() => {
+                return Some(surface.identity.route_open_url(open.url.clone()));
+            }
             _ => {}
         }
         let metadata = metadata_of(&surface.state.borrow());

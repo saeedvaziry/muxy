@@ -145,7 +145,13 @@ impl StandaloneTerminal {
     ) -> Option<crate::terminal::SurfaceSignal> {
         match self.backend.route(crate::terminal::unwrap_event(event), cx) {
             Some(crate::terminal::RoutedTerminalEvent::Standalone(signal)) => Some(signal),
-            Some(crate::terminal::RoutedTerminalEvent::Workspace(_, _)) | None => None,
+            Some(crate::terminal::RoutedTerminalEvent::StandaloneOpenUrl(url)) => {
+                cx.open_url(&url);
+                None
+            }
+            Some(crate::terminal::RoutedTerminalEvent::Workspace(_, _))
+            | Some(crate::terminal::RoutedTerminalEvent::WorkspaceOpenUrl(_, _))
+            | None => None,
         }
     }
 
@@ -240,6 +246,13 @@ impl TerminalSurfaces {
     }
 
     #[cfg(target_os = "macos")]
+    pub(crate) fn native_view_compositor(
+        &self,
+    ) -> Option<crate::native_compositor::NativeViewCompositor> {
+        self.backend.compositor()
+    }
+
+    #[cfg(target_os = "macos")]
     pub fn wakeups(&self) -> Option<crate::terminal::TerminalWakeups> {
         self.backend
             .wakeup_receiver()
@@ -327,12 +340,15 @@ impl TerminalSurfaces {
         &mut self,
         event: crate::terminal::TerminalEvent,
         cx: &mut App,
-    ) -> Option<(TabId, crate::terminal::SurfaceSignal)> {
+    ) -> Option<crate::terminal::RoutedTerminalEvent> {
         match self.backend.route(crate::terminal::unwrap_event(event), cx) {
-            Some(crate::terminal::RoutedTerminalEvent::Workspace(tab_id, signal)) => {
-                Some((tab_id, signal))
+            Some(event @ crate::terminal::RoutedTerminalEvent::Workspace(_, _))
+            | Some(event @ crate::terminal::RoutedTerminalEvent::WorkspaceOpenUrl(_, _)) => {
+                Some(event)
             }
-            Some(crate::terminal::RoutedTerminalEvent::Standalone(_)) | None => None,
+            Some(crate::terminal::RoutedTerminalEvent::Standalone(_))
+            | Some(crate::terminal::RoutedTerminalEvent::StandaloneOpenUrl(_))
+            | None => None,
         }
     }
 
@@ -341,7 +357,7 @@ impl TerminalSurfaces {
         &mut self,
         _event: crate::terminal::TerminalEvent,
         _cx: &mut App,
-    ) -> Option<(TabId, crate::terminal::SurfaceSignal)> {
+    ) -> Option<crate::terminal::RoutedTerminalEvent> {
         None
     }
 

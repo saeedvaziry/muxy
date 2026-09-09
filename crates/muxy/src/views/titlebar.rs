@@ -5,8 +5,8 @@ use crate::views::menu::Item;
 use crate::views::window::MainWindow;
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, ClickEvent, Context, FontWeight, InteractiveElement, IntoElement, ParentElement,
-    SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    AnyElement, AppContext, ClickEvent, Context, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 use muxy_ui::components::{IconButton, IconGlyph};
 use muxy_ui::icon::Icon;
@@ -121,6 +121,7 @@ fn layout_menu(state: &AppState, cx: &mut Context<MainWindow>) -> AnyElement {
 pub fn main_titlebar(
     state: &AppState,
     layout: AppLayout,
+    extension_items: &[crate::extensions::ExtensionTopbarBinding],
     cx: &mut Context<MainWindow>,
 ) -> AnyElement {
     let metrics = &state.metrics;
@@ -153,11 +154,83 @@ pub fn main_titlebar(
 
     if state.prefs.show_topbar_actions && state.active_project().is_some() {
         bar = bar
+            .child(extension_actions(state, extension_items, cx))
             .child(open_project_control(state, cx))
             .child(pane_actions(state, cx));
     }
 
     bar.into_any_element()
+}
+
+pub(crate) fn extension_actions(
+    state: &AppState,
+    items: &[crate::extensions::ExtensionTopbarBinding],
+    cx: &mut Context<MainWindow>,
+) -> AnyElement {
+    let mut actions = div()
+        .flex()
+        .flex_row()
+        .flex_none()
+        .items_center()
+        .gap(state.metrics.spacing1());
+    for item in items {
+        let extension_id = item.extension_id.clone();
+        let command = item.command.clone();
+        let icon = crate::extensions::surface_view::extension_icon(
+            &item.icon,
+            &item.resource_root,
+            state.metrics.scaled(13.0),
+            state.theme.fg_muted,
+        );
+        let label = item
+            .tooltip
+            .clone()
+            .unwrap_or_else(|| format!("{} extension action", item.item_id));
+        actions = actions.child(
+            div()
+                .id(SharedString::from(format!(
+                    "extension-topbar-{}-{}",
+                    item.extension_id, item.item_id
+                )))
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .size(state.metrics.control_medium())
+                .rounded(state.metrics.radius_sm())
+                .cursor_pointer()
+                .hover(|style| style.bg(state.theme.hover))
+                .tooltip({
+                    let label = SharedString::from(label);
+                    let background = state.theme.raised();
+                    let foreground = state.theme.fg;
+                    let border = state.theme.border;
+                    move |_, cx| {
+                        cx.new(|_| {
+                            muxy_ui::components::Tooltip::new(
+                                label.clone(),
+                                background,
+                                foreground,
+                                border,
+                            )
+                        })
+                        .into()
+                    }
+                })
+                .on_click(
+                    cx.listener(move |window: &mut MainWindow, event: &ClickEvent, _, cx| {
+                        window.run_extension_command(
+                            &extension_id,
+                            &command,
+                            Some(event.position()),
+                            cx,
+                        );
+                    }),
+                )
+                .child(icon),
+        );
+    }
+    actions.into_any_element()
 }
 
 fn pane_actions(state: &AppState, cx: &mut Context<MainWindow>) -> AnyElement {

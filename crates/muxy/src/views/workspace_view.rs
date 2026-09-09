@@ -33,6 +33,7 @@ const SEARCH_BAR_WIDTH: f32 = 280.0;
 
 pub struct Panes<'a> {
     pub terminals: &'a TerminalSurfaces,
+    pub extension_webviews: &'a crate::extensions::webview::ExtensionWebViewRegistry,
     pub area_bounds: &'a std::collections::HashMap<String, Bounds<Pixels>>,
     pub search_inputs: &'a std::collections::HashMap<String, Entity<TextInput>>,
     pub reveal: &'a std::collections::HashMap<String, ScrollbarRevealState>,
@@ -44,8 +45,12 @@ pub struct Panes<'a> {
 }
 
 impl Panes<'_> {
-    fn element(&self, tab_id: &str, visible: bool) -> Option<AnyElement> {
-        self.terminals.element(tab_id, visible)
+    fn element(&self, tab: &Tab, visible: bool) -> Option<AnyElement> {
+        match tab.kind {
+            TabKind::Terminal => self.terminals.element(&tab.id, visible),
+            TabKind::ExtensionWebView => self.extension_webviews.element(&tab.id, visible),
+            TabKind::Browser => None,
+        }
     }
 
     fn thumb(&self, tab_id: &str, area_id: &str) -> Option<(ThumbGeometry, f64)> {
@@ -164,6 +169,7 @@ pub fn titlebar_tab_strip(
     workspace: &WorkspaceState,
     is_window_titlebar: bool,
     available_width: f32,
+    extension_items: &[crate::extensions::ExtensionTopbarBinding],
     cx: &mut Context<MainWindow>,
 ) -> AnyElement {
     match workspace.top_level_root.as_ref() {
@@ -182,6 +188,7 @@ pub fn titlebar_tab_strip(
                 active_tab_id: active_tab_id.as_deref(),
                 is_window_titlebar,
                 available_width,
+                extension_items,
             },
             cx,
         ),
@@ -203,6 +210,7 @@ pub fn titlebar_tab_strip(
                 active_tab_id: None,
                 is_window_titlebar,
                 available_width,
+                extension_items,
             },
             cx,
         ),
@@ -358,6 +366,7 @@ fn render_outer_group(
             active_tab_id,
             is_window_titlebar: false,
             available_width,
+            extension_items: &[],
         },
         cx,
     );
@@ -520,9 +529,7 @@ fn pane_content(
     area_id: &str,
     cx: &mut Context<MainWindow>,
 ) -> AnyElement {
-    let surface = (tab.kind == TabKind::Terminal)
-        .then(|| panes.element(&tab.id, true))
-        .flatten();
+    let surface = panes.element(tab, true);
     let Some(surface) = surface else {
         return pane_placeholder(state, tab, area_id, cx);
     };
@@ -881,6 +888,7 @@ struct TabStripSpec<'a> {
     active_tab_id: Option<&'a str>,
     is_window_titlebar: bool,
     available_width: f32,
+    extension_items: &'a [crate::extensions::ExtensionTopbarBinding],
 }
 
 fn tab_strip(
@@ -897,6 +905,7 @@ fn tab_strip(
         active_tab_id,
         is_window_titlebar,
         available_width,
+        extension_items,
     } = spec;
     let tabs: Vec<&Tab> = tab_ids
         .iter()
@@ -909,7 +918,8 @@ fn tab_strip(
             .is_some_and(|layout| layout.area_ids().len() > 1);
     let actions_visible = !is_window_titlebar || state.prefs.show_topbar_actions;
     let action_count = if actions_visible {
-        2 + usize::from(show_maximize)
+        2 + extension_items.len()
+            + usize::from(show_maximize)
             + usize::from(state.prefs.browser_enabled)
             + usize::from(!state.layouts().is_empty())
     } else {
@@ -1001,6 +1011,16 @@ fn tab_strip(
                 .child(scroll_row),
         )
         .children(pinned_new_button)
+        .when(
+            is_window_titlebar && !extension_items.is_empty(),
+            |element| {
+                element.child(crate::views::titlebar::extension_actions(
+                    state,
+                    extension_items,
+                    cx,
+                ))
+            },
+        )
         .when(
             !is_window_titlebar || state.prefs.show_topbar_actions,
             |element| {

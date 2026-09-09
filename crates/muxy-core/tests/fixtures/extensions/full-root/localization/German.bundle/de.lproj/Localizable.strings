@@ -1,0 +1,5 @@
+"Created branch %@" = "Zweig %@ erstellt";
+"%lld changes" = "%lld Änderungen";
+"%@ (%@)" = "%2$@ - %1$@";
+"Settings" = "Einstellungen";
+"%lld%%" = "%lld%%";

@@ -1890,7 +1890,10 @@ impl MainWindow {
         let theme = self.state.theme.clone();
         let metrics = self.state.metrics;
         let appearance = self.state.appearance;
-        let modal = cx.new(|cx| settings::SettingsModal::new(theme, metrics, appearance, cx));
+        let extension_options = self.extension_settings_options();
+        let modal = cx.new(|cx| {
+            settings::SettingsModal::new(theme, metrics, appearance, extension_options, cx)
+        });
         if let Some(category) = category {
             modal.update(cx, |modal, cx| modal.select_category(category, cx));
         }
@@ -2188,11 +2191,14 @@ impl MainWindow {
             let read = view.read(cx);
             (read.scope(), read.query(cx))
         };
-        let rows = omnibox::items::ranked(
-            omnibox::items::items(&self.state, &self.terminal_runtime.surfaces, scope),
-            scope,
-            &query,
-        );
+        let mut candidates =
+            omnibox::items::items(&self.state, &self.terminal_runtime.surfaces, scope);
+        if scope == omnibox::Scope::CommandShortcuts {
+            candidates.extend(omnibox::items::extension_command_items(
+                self.extension_runtime.catalog(),
+            ));
+        }
+        let rows = omnibox::items::ranked(candidates, scope, &query);
         view.update(cx, |view, cx| view.set_rows(rows, reset_highlight, cx));
     }
 
@@ -2230,6 +2236,10 @@ impl MainWindow {
                 tab_id,
             } => self.select_omnibox_tab(&project_id, &worktree_path, &tab_id, cx),
             omnibox::ItemAction::RunCommand(id) => self.create_command_tab(&id, cx),
+            omnibox::ItemAction::RunExtensionCommand {
+                extension_id,
+                command_id,
+            } => self.run_extension_command(&extension_id, &command_id, None, cx),
         }
     }
 

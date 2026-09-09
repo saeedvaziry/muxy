@@ -76,6 +76,10 @@ pub enum ItemAction {
         tab_id: String,
     },
     RunCommand(String),
+    RunExtensionCommand {
+        extension_id: String,
+        command_id: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -353,6 +357,46 @@ fn command_items(state: &AppState) -> Vec<Item> {
             search_key: [shortcut.display_name(), shortcut.trimmed_command()].join(" "),
             action: ItemAction::RunCommand(shortcut.id.clone()),
             unread: false,
+        })
+        .collect()
+}
+
+pub(crate) fn extension_command_items(
+    catalog: &muxy_core::extensions::runtime::ExtensionRuntimeCatalog,
+) -> Vec<Item> {
+    catalog
+        .records()
+        .iter()
+        .filter(|(_, record)| record.enabled)
+        .flat_map(|(extension_id, record)| {
+            let display_name = record.extension.display_name().to_owned();
+            record
+                .extension
+                .manifest
+                .commands
+                .iter()
+                .filter(|command| !command.action.is_anchored())
+                .map(move |command| Item {
+                    id: format!("extension-command-{extension_id}-{}", command.id),
+                    symbol: "puzzlepiece.extension".to_owned(),
+                    section: "Extension Commands".to_owned(),
+                    title: command.title.clone(),
+                    subtitle: command
+                        .subtitle
+                        .clone()
+                        .or_else(|| Some(display_name.clone())),
+                    search_key: [
+                        display_name.as_str(),
+                        command.title.as_str(),
+                        command.subtitle.as_deref().unwrap_or(""),
+                    ]
+                    .join(" "),
+                    action: ItemAction::RunExtensionCommand {
+                        extension_id: extension_id.clone(),
+                        command_id: command.id.clone(),
+                    },
+                    unread: false,
+                })
         })
         .collect()
 }

@@ -20,6 +20,7 @@ base64.workspace = true
 rfd.workspace = true
 log.workspace = true
 thiserror.workspace = true
+libc.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 ghostty-host.workspace = true
@@ -32,6 +33,7 @@ objc2-quartz-core.workspace = true
 objc2-foundation.workspace = true
 objc2-app-kit.workspace = true
 objc2-user-notifications.workspace = true
+objc2-web-kit.workspace = true
 block2.workspace = true
 
 [dev-dependencies]

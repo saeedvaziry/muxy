@@ -147,6 +147,12 @@ impl FlippedNativeViewContainer {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum NativeViewLayer {
+    Underlay,
+    Interactive,
+}
+
 #[derive(Clone)]
 pub struct NativeViewCompositor {
     inner: Rc<CompositorInner>,
@@ -186,6 +192,7 @@ impl NativeViewCompositor {
             inner: Rc::new(CompositorInner {
                 container,
                 gpui_view,
+                superview,
                 model: RefCell::new(RegistryModel::default()),
                 views: RefCell::new(HashMap::new()),
                 container_frame: Cell::new(NativeFrame::from_ns_rect(initial_frame)),
@@ -197,6 +204,23 @@ impl NativeViewCompositor {
         &self,
         view: &NSView,
         z_index: i32,
+    ) -> Result<NativeViewRegistration, NativeViewCompositorError> {
+        self.register_in_layer(view, z_index, NativeViewLayer::Underlay)
+    }
+
+    pub fn register_interactive(
+        &self,
+        view: &NSView,
+        z_index: i32,
+    ) -> Result<NativeViewRegistration, NativeViewCompositorError> {
+        self.register_in_layer(view, z_index, NativeViewLayer::Interactive)
+    }
+
+    fn register_in_layer(
+        &self,
+        view: &NSView,
+        z_index: i32,
+        layer: NativeViewLayer,
     ) -> Result<NativeViewRegistration, NativeViewCompositorError> {
         let view_ptr = view as *const NSView;
         if view_ptr == Retained::as_ptr(&self.inner.gpui_view)
@@ -214,12 +238,13 @@ impl NativeViewCompositor {
             .inner
             .model
             .borrow_mut()
-            .register(z_index)
+            .register_in_layer(z_index, layer)
             .ok_or(NativeViewCompositorError::IdentityExhausted)?;
         self.inner
             .views
             .borrow_mut()
             .insert(registration.id, view.retain());
+        view.setClipsToBounds(true);
         self.inner.apply_order(&registration.order);
 
         if view.isHidden() {
@@ -277,6 +302,7 @@ fn track_mouse_moved(view: &NSView) {
 struct CompositorInner {
     container: Retained<FlippedNativeViewContainer>,
     gpui_view: Retained<NSView>,
+    superview: Retained<NSView>,
     model: RefCell<RegistryModel>,
     views: RefCell<HashMap<NativeViewId, Retained<NSView>>>,
     container_frame: Cell<NativeFrame>,
@@ -325,6 +351,16 @@ impl CompositorInner {
     }
 
     fn sync_frame(&self, id: NativeViewId, frame: NativeFrame) -> bool {
+        let Some(layer) = self.model.borrow().layer(id) else {
+            return false;
+        };
+        let frame = match layer {
+            NativeViewLayer::Underlay => frame,
+            NativeViewLayer::Interactive => NativeFrame::from_ns_rect(
+                self.container
+                    .convertRect_toView(frame.to_ns_rect(), Some(&self.superview)),
+            ),
+        };
         if !self.model.borrow_mut().sync_frame(id, frame) {
             return false;
         }
@@ -381,21 +417,42 @@ impl CompositorInner {
     }
 
     fn apply_order(&self, order: &[NativeViewId]) {
+        let model = self.model.borrow();
         let views = self.views.borrow();
-        let ordered_views: Vec<_> = order
-            .iter()
-            .filter_map(|id| views.get(id).cloned())
-            .collect();
-        debug_assert_eq!(ordered_views.len(), order.len());
+        let mut underlay_views = Vec::new();
+        let mut interactive_views = Vec::new();
+        for id in order {
+            let Some(view) = views.get(id).cloned() else {
+                continue;
+            };
+            match model.layer(*id) {
+                Some(NativeViewLayer::Underlay) => underlay_views.push(view),
+                Some(NativeViewLayer::Interactive) => interactive_views.push(view),
+                None => {}
+            }
+        }
+        debug_assert_eq!(underlay_views.len() + interactive_views.len(), order.len());
 
         self.container
-            .setSubviews(&NSArray::from_retained_slice(&ordered_views));
+            .setSubviews(&NSArray::from_retained_slice(&underlay_views));
+        let mut relative = self.gpui_view.clone();
+        for view in interactive_views {
+            self.superview.addSubview_positioned_relativeTo(
+                &view,
+                NSWindowOrderingMode::Above,
+                Some(&relative),
+            );
+            relative = view;
+        }
     }
 }
 
 impl Drop for CompositorInner {
     fn drop(&mut self) {
         self.container.removeFromSuperview();
+        for view in self.views.get_mut().values() {
+            view.removeFromSuperview();
+        }
         self.views.get_mut().clear();
     }
 }
@@ -452,7 +509,7 @@ pub struct NativeViewSlot {
 
 impl NativeViewSlot {
     #[track_caller]
-    pub fn new(compositor: NativeViewCompositor, id: NativeViewId) -> Self {
+    fn new(compositor: NativeViewCompositor, id: NativeViewId) -> Self {
         Self {
             compositor,
             id,
@@ -584,6 +641,7 @@ impl NativeFrame {
 struct RegistryEntry {
     z_index: i32,
     sequence: u64,
+    layer: NativeViewLayer,
     visible: bool,
     frame: Option<NativeFrame>,
 }
@@ -608,7 +666,16 @@ struct ZIndexDecision {
 }
 
 impl RegistryModel {
+    #[cfg(test)]
     fn register(&mut self, z_index: i32) -> Option<RegisterDecision> {
+        self.register_in_layer(z_index, NativeViewLayer::Underlay)
+    }
+
+    fn register_in_layer(
+        &mut self,
+        z_index: i32,
+        layer: NativeViewLayer,
+    ) -> Option<RegisterDecision> {
         let id_value = self.next_id.checked_add(1)?;
         let sequence = self.next_sequence;
         let next_sequence = sequence.checked_add(1)?;
@@ -621,6 +688,7 @@ impl RegistryModel {
             RegistryEntry {
                 z_index,
                 sequence,
+                layer,
                 visible: true,
                 frame: None,
             },
@@ -680,16 +748,20 @@ impl RegistryModel {
         self.entries.get(&id).is_some_and(|entry| entry.visible)
     }
 
+    fn layer(&self, id: NativeViewId) -> Option<NativeViewLayer> {
+        self.entries.get(&id).map(|entry| entry.layer)
+    }
+
     fn sorted_ids(&self) -> Vec<NativeViewId> {
         let mut ordered: Vec<_> = self.entries.iter().collect();
-        ordered.sort_by_key(|(_, entry)| (entry.z_index, entry.sequence));
+        ordered.sort_by_key(|(_, entry)| (entry.layer, entry.z_index, entry.sequence));
         ordered.into_iter().map(|(id, _)| *id).collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{NativeBackdrop, NativeFrame, RegistryModel};
+    use super::{NativeBackdrop, NativeFrame, NativeViewLayer, RegistryModel};
 
     fn frame(x: f64, y: f64, width: f64, height: f64) -> NativeFrame {
         NativeFrame {
@@ -709,6 +781,23 @@ mod tests {
         let fourth = registry.register(-2).unwrap().id;
 
         assert_eq!(registry.order, vec![second, fourth, first, third]);
+    }
+
+    #[test]
+    fn interactive_views_are_ordered_above_underlay_views() {
+        let mut registry = RegistryModel::default();
+        let interactive = registry
+            .register_in_layer(-100, NativeViewLayer::Interactive)
+            .unwrap()
+            .id;
+        let underlay = registry.register(100).unwrap().id;
+
+        assert_eq!(registry.order, vec![underlay, interactive]);
+        assert_eq!(registry.layer(underlay), Some(NativeViewLayer::Underlay));
+        assert_eq!(
+            registry.layer(interactive),
+            Some(NativeViewLayer::Interactive)
+        );
     }
 
     #[test]

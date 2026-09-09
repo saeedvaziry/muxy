@@ -175,7 +175,10 @@ enum Control {
         request_id: u64,
         reply: CommandReply,
     },
-    ReplaceExtensionSnapshot(ExtensionSnapshot),
+    ReplaceExtensionSnapshot {
+        snapshot: ExtensionSnapshot,
+        completion: mpsc::Sender<()>,
+    },
     Broadcast(ExtensionBroadcast),
     PushExtensionEvent {
         extension_id: String,
@@ -204,8 +207,12 @@ pub struct SocketServerHandle {
 
 impl SocketServerHandle {
     pub fn replace_extension_snapshot(&self, snapshot: ExtensionSnapshot) {
-        self.sender
-            .send(Control::ReplaceExtensionSnapshot(snapshot));
+        let (completion, receiver) = mpsc::channel();
+        self.sender.send(Control::ReplaceExtensionSnapshot {
+            snapshot,
+            completion,
+        });
+        let _ = receiver.recv();
     }
 
     pub fn broadcast(&self, event: ExtensionBroadcast) {
@@ -428,7 +435,10 @@ fn run_worker(
                         }
                     }
                 }
-                Control::ReplaceExtensionSnapshot(snapshot) => {
+                Control::ReplaceExtensionSnapshot {
+                    snapshot,
+                    completion,
+                } => {
                     replace_snapshot(
                         snapshot,
                         &mut extension_snapshot,
@@ -436,6 +446,7 @@ fn run_worker(
                         &mut live_sessions,
                         &mut pending_invokes,
                     );
+                    let _ = completion.send(());
                 }
                 Control::Broadcast(event) => {
                     let line = format!("{}\n", event.encode());
@@ -719,6 +730,22 @@ fn replace_snapshot(
     live_sessions: &mut std::collections::HashMap<String, u64>,
     pending_invokes: &mut std::collections::HashMap<String, PendingInvoke>,
 ) {
+    let session_ids = sessions.keys().copied().collect::<Vec<_>>();
+    for session_id in session_ids {
+        let authorization_changed = sessions
+            .get(&session_id)
+            .and_then(|session| session.extension_id.as_ref())
+            .is_some_and(|extension_id| {
+                current.entries.get(extension_id).map(|entry| &entry.token)
+                    != snapshot.entries.get(extension_id).map(|entry| &entry.token)
+            });
+        if authorization_changed {
+            detach_session(session_id, sessions, live_sessions, pending_invokes);
+            if let Some(session) = sessions.get_mut(&session_id) {
+                session.extension_id = None;
+            }
+        }
+    }
     *current = snapshot;
     let session_ids = sessions.keys().copied().collect::<Vec<_>>();
     for session_id in session_ids {
@@ -1627,6 +1654,31 @@ mod tests {
         assert_eq!(request.origin, RequestOrigin::default());
         request.responder.respond(CommandReply::new("cli"));
         assert_eq!(read_all(reader.into_inner()), b"cli\0");
+    }
+
+    #[test]
+    fn snapshot_token_rotation_requires_identification_with_the_new_token() {
+        let directory = directory();
+        let path = directory.path().join("main.sock");
+        let (_server, handle, _) = SocketServer::start(extension_config(&path, true)).unwrap();
+        let mut writer = connect(&path);
+        let mut reader = BufReader::new(writer.try_clone().unwrap());
+        identify(&mut writer, &mut reader);
+
+        let mut replacement = extension_entry(true);
+        replacement.token = "rotated-secret".to_owned();
+        handle.replace_extension_snapshot(ExtensionSnapshot {
+            entries: BTreeMap::from([("sample.extension".to_owned(), replacement)]),
+        });
+
+        writer
+            .write_all(b"identify|sample.extension|secret\n")
+            .unwrap();
+        assert_eq!(read_line(&mut reader), "error:invalid extension token\n");
+        writer
+            .write_all(b"identify|sample.extension|rotated-secret\n")
+            .unwrap();
+        assert_eq!(read_line(&mut reader), "ok\n");
     }
 
     #[test]

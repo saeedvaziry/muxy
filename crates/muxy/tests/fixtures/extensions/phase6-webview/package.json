@@ -1,0 +1,21 @@
+{
+  "name": "muxy-phase6-webview-fixture",
+  "version": "1.0.0",
+  "muxy": {
+    "description": "Rust WKWebView compatibility fixture",
+    "tabTypes": [
+      {
+        "id": "main",
+        "title": "Extension WebView Fixture",
+        "entry": "index.html",
+        "defaultData": {
+          "source": "manifest-default"
+        }
+      }
+    ],
+    "permissions": [
+      "storage:read",
+      "storage:write"
+    ]
+  }
+}

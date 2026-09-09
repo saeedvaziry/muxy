@@ -83,6 +83,23 @@ impl PanelRuntime {
     }
 }
 
+impl crate::views::window::MainWindow {
+    pub(crate) fn place_panel(&mut self, placement: PanelPlacement) {
+        let Some(displacement) = self.panels.open(placement) else {
+            return;
+        };
+        if displacement.displaced.id.as_str() == muxy_core::composer::PANEL_ID {
+            self.panels.close(&displacement.replacement.id);
+            self.panels.open(displacement.displaced);
+            return;
+        }
+        let changes = self
+            .extension_surfaces
+            .close(displacement.displaced.id.as_str());
+        self.publish_extension_surface_changes(&changes);
+    }
+}
+
 fn phase_3_status_path(
     is_test_process: bool,
     case_name: Option<&str>,

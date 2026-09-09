@@ -88,6 +88,31 @@ pub(super) fn content(modal: &SettingsModal, cx: &mut Context<SettingsModal>) ->
             cx,
         ),
     ];
+    if !modal.extension_options().sidebars.is_empty() {
+        let selected = settings::string_value("muxy.activeSidebar", "");
+        let choices = modal.extension_options().sidebars.iter().cloned().fold(
+            vec![Choice::new("", "Built-in")],
+            |mut choices, item| {
+                choices.push(Choice::new(item.0, item.1));
+                choices
+            },
+        );
+        sidebar.insert(
+            0,
+            picker_row(
+                modal,
+                "Active Sidebar",
+                "muxy.activeSidebar",
+                "",
+                appended_stored(
+                    choices,
+                    &selected,
+                    unavailable_label(&selected, "Unavailable Extension Sidebar"),
+                ),
+                cx,
+            ),
+        );
+    }
     if project_focused {
         sidebar.push(toggle_row(
             style,

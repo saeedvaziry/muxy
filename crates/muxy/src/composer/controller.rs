@@ -1,8 +1,6 @@
-use crate::panels::PanelRuntime;
 use gpui::{Entity, Subscription};
 use muxy_core::composer::DraftId;
 use muxy_core::prefs::{ComposerPanelMode, ComposerPanelPosition};
-use muxy_ui::panel::{PanelId, PanelMode, PanelPlacement, PanelPosition};
 use muxy_ui::text_input::TextInput;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -80,7 +78,6 @@ pub struct ComposerController {
     target: Option<ComposerTarget>,
     input: Option<Entity<TextInput>>,
     file_attachments: Vec<String>,
-    panels: PanelRuntime,
     input_subscription: Option<Subscription>,
     release_blocked: bool,
     staged_restore: Option<StagedComposerRestore>,
@@ -106,19 +103,13 @@ impl ComposerController {
         &self.file_attachments
     }
 
-    pub fn panels(&self) -> &PanelRuntime {
-        &self.panels
-    }
-
     pub fn open(
         &mut self,
         target: ComposerTarget,
         input: Entity<TextInput>,
         file_attachments: Vec<String>,
         subscription: Subscription,
-        placement: PanelPlacement,
     ) {
-        self.panels.open(placement);
         self.target = Some(target);
         self.input = Some(input);
         self.file_attachments = file_attachments;
@@ -150,8 +141,6 @@ impl ComposerController {
     }
 
     pub fn close(&mut self) {
-        self.panels
-            .close(&PanelId::from(muxy_core::composer::PANEL_ID));
         self.target = None;
         self.input = None;
         self.file_attachments.clear();
@@ -170,20 +159,6 @@ impl ComposerController {
 
     pub fn replace_file_attachments(&mut self, paths: Vec<String>) {
         self.file_attachments = paths;
-    }
-
-    pub fn placement(&self) -> Option<&PanelPlacement> {
-        self.panels
-            .host()
-            .placement(&PanelId::from(muxy_core::composer::PANEL_ID))
-    }
-
-    pub fn place(&mut self, position: PanelPosition, mode: PanelMode) {
-        self.panels.open(PanelPlacement::new(
-            muxy_core::composer::PANEL_ID,
-            position,
-            mode,
-        ));
     }
 
     pub fn staged_restore(&self) -> Option<&StagedComposerRestore> {

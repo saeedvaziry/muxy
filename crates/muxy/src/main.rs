@@ -1,6 +1,7 @@
 mod assets;
 mod command;
 mod composer;
+pub mod extensions;
 mod git;
 mod keymap;
 #[cfg(target_os = "macos")]
@@ -61,13 +62,24 @@ fn main() {
     }
     let app_support = muxy_core::prefs::app_support_dir();
     let mode = muxy_core::build_mode!();
-    let socket_path =
-        muxy_core::environment::RuntimePathPolicy::new(mode).main_socket_path(&app_support);
+    let runtime_paths = muxy_core::environment::RuntimePathPolicy::new(mode);
+    let extension_paths =
+        muxy_core::extensions::paths::ExtensionPaths::new(runtime_paths, &app_support);
+    if let Err(error) = muxy_core::extensions::migration::run_startup(&extension_paths) {
+        eprintln!("failed to migrate Swift extensions: {error}");
+        std::process::exit(1);
+    }
+    let phase_6_fixture = extensions::webview::prepare_phase_6_fixture(&extension_paths)
+        .unwrap_or_else(|error| panic!("failed to prepare extension webview fixture: {error}"));
+    let extension_runtime = extensions::ExtensionRuntime::load(extension_paths)
+        .unwrap_or_else(|error| panic!("failed to load extensions: {error}"));
+    let extension_snapshot = extension_runtime.socket_snapshot();
+    let socket_path = runtime_paths.main_socket_path(&app_support);
     #[cfg(target_os = "macos")]
     terminal::install_development_cli_environment(mode, &socket_path)
         .unwrap_or_else(|error| panic!("failed to install development CLI environment: {error}"));
     let quick_terminal_socket_path = socket_path.clone();
-    let socket = socket::runtime::start(socket_path)
+    let socket = socket::runtime::start(socket_path, extension_snapshot)
         .unwrap_or_else(|error| panic!("failed to start socket server: {error}"));
     let execution_environment = git::environment_source();
 
@@ -86,7 +98,13 @@ fn main() {
 
             let desktop_notifications =
                 notifications::desktop::DesktopNotificationService::prepare();
-            let state = AppState::load(cx);
+            let mut state = AppState::load(cx);
+            if let Some(fixture) = phase_6_fixture.as_ref() {
+                extensions::webview::provision_phase_6_fixture_tab(&mut state, fixture)
+                    .unwrap_or_else(|error| {
+                        panic!("failed to provision extension webview fixture: {error}")
+                    });
+            }
             muxy_core::prefs::settings::sync();
             cx.bind_keys(keymap::key_bindings(&state.shortcuts));
             cx.bind_keys(keymap::command_bindings(&state.command_shortcuts));
@@ -123,7 +141,7 @@ fn main() {
                     cx.new(|cx| {
                         MainWindow::new(
                             state,
-                            socket,
+                            views::window::WindowRuntime::new(socket, extension_runtime),
                             mode,
                             execution_environment,
                             desktop_notifications,

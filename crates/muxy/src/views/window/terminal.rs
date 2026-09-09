@@ -61,8 +61,17 @@ impl MainWindow {
     }
 
     pub(super) fn on_runtime_event(&mut self, event: TerminalEvent, cx: &mut Context<Self>) {
-        let Some((tab_id, signal)) = self.terminal_runtime.surfaces.route(event, cx) else {
+        let Some(event) = self.terminal_runtime.surfaces.route(event, cx) else {
             return;
+        };
+        let (tab_id, signal) = match event {
+            crate::terminal::RoutedTerminalEvent::Workspace(tab_id, signal) => (tab_id, signal),
+            crate::terminal::RoutedTerminalEvent::WorkspaceOpenUrl(tab_id, url) => {
+                self.open_terminal_url(&tab_id, &url, cx);
+                return;
+            }
+            crate::terminal::RoutedTerminalEvent::Standalone(_)
+            | crate::terminal::RoutedTerminalEvent::StandaloneOpenUrl(_) => return,
         };
         match signal {
             SurfaceSignal::DesktopNotification { title, body } => {

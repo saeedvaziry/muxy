@@ -1,0 +1,1 @@
+globalThis.fixture = true;

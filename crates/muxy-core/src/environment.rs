@@ -106,6 +106,27 @@ impl RuntimePathPolicy {
         }
     }
 
+    pub const fn extension_packages_directory_name(self) -> &'static str {
+        match self.mode {
+            BuildMode::Development => "extensions-dev",
+            BuildMode::Production => "extensions",
+        }
+    }
+
+    pub const fn extension_state_directory_name(self) -> &'static str {
+        match self.mode {
+            BuildMode::Development => "extension-state-dev",
+            BuildMode::Production => "extension-state",
+        }
+    }
+
+    pub const fn extension_staging_directory_name(self) -> &'static str {
+        match self.mode {
+            BuildMode::Development => "extension-staging-dev",
+            BuildMode::Production => "extension-staging",
+        }
+    }
+
     pub fn main_socket_path(self, app_support_root: impl AsRef<Path>) -> PathBuf {
         app_support_root.as_ref().join(self.main_socket_filename())
     }
@@ -138,6 +159,24 @@ impl RuntimePathPolicy {
         app_support_root
             .as_ref()
             .join(self.hook_staging_directory_name())
+    }
+
+    pub fn extension_packages_path(self, app_support_root: impl AsRef<Path>) -> PathBuf {
+        app_support_root
+            .as_ref()
+            .join(self.extension_packages_directory_name())
+    }
+
+    pub fn extension_state_path(self, app_support_root: impl AsRef<Path>) -> PathBuf {
+        app_support_root
+            .as_ref()
+            .join(self.extension_state_directory_name())
+    }
+
+    pub fn extension_staging_path(self, app_support_root: impl AsRef<Path>) -> PathBuf {
+        app_support_root
+            .as_ref()
+            .join(self.extension_staging_directory_name())
     }
 }
 
@@ -377,6 +416,27 @@ mod tests {
         assert_eq!(production.fallback_session_directory_name(501), "muxy-501");
         assert_eq!(development.hook_staging_directory_name(), "hooks-dev");
         assert_eq!(production.hook_staging_directory_name(), "hooks");
+        assert_eq!(
+            development.extension_packages_directory_name(),
+            "extensions-dev"
+        );
+        assert_eq!(production.extension_packages_directory_name(), "extensions");
+        assert_eq!(
+            development.extension_state_directory_name(),
+            "extension-state-dev"
+        );
+        assert_eq!(
+            production.extension_state_directory_name(),
+            "extension-state"
+        );
+        assert_eq!(
+            development.extension_staging_directory_name(),
+            "extension-staging-dev"
+        );
+        assert_eq!(
+            production.extension_staging_directory_name(),
+            "extension-staging"
+        );
 
         assert_eq!(
             development.main_socket_path(app_support),
@@ -417,6 +477,30 @@ mod tests {
         assert_eq!(
             production.hook_staging_path(app_support),
             app_support.join("hooks")
+        );
+        assert_eq!(
+            development.extension_packages_path(app_support),
+            app_support.join("extensions-dev")
+        );
+        assert_eq!(
+            production.extension_packages_path(app_support),
+            app_support.join("extensions")
+        );
+        assert_eq!(
+            development.extension_state_path(app_support),
+            app_support.join("extension-state-dev")
+        );
+        assert_eq!(
+            production.extension_state_path(app_support),
+            app_support.join("extension-state")
+        );
+        assert_eq!(
+            development.extension_staging_path(app_support),
+            app_support.join("extension-staging-dev")
+        );
+        assert_eq!(
+            production.extension_staging_path(app_support),
+            app_support.join("extension-staging")
         );
     }
 

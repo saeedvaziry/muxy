@@ -22,6 +22,9 @@ pub struct Theme {
     pub accent_foreground: Hsla,
     pub warning: Hsla,
     pub danger: Hsla,
+    pub diff_add: Hsla,
+    pub diff_remove: Hsla,
+    pub diff_hunk: Hsla,
 }
 
 const FALLBACK_BACKGROUND: u32 = 0x19171f;
@@ -35,6 +38,8 @@ impl Theme {
         let accent = theme.palette_color(4).unwrap_or(rgb(FALLBACK_ACCENT));
         let warning = theme.palette_color(3).unwrap_or(rgb(0xe0af68));
         let danger = theme.palette_color(1).unwrap_or(rgb(0xec4899));
+        let diff_add = theme.palette_color(2).unwrap_or(rgb(0x22c55e));
+        let diff_hunk = theme.palette_color(6).unwrap_or(accent);
 
         Self {
             bg: bg.into(),
@@ -49,6 +54,9 @@ impl Theme {
             accent_foreground: contrasting_foreground(accent).into(),
             warning: warning.into(),
             danger: danger.into(),
+            diff_add: diff_add.into(),
+            diff_remove: danger.into(),
+            diff_hunk: diff_hunk.into(),
         }
     }
 

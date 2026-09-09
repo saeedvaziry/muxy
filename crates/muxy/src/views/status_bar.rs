@@ -22,6 +22,7 @@ pub fn status_bar(
     repository_mutation_busy: bool,
     repository_ai_menu_available: bool,
     trailing: Option<AnyElement>,
+    extension_items: &[crate::extensions::ExtensionStatusBarBinding],
     cx: &mut Context<MainWindow>,
 ) -> AnyElement {
     let metrics = &state.metrics;
@@ -111,6 +112,27 @@ pub fn status_bar(
             }
         }
     }
+    for item in extension_items
+        .iter()
+        .filter(|item| item.side == muxy_core::extensions::manifest::StatusBarSide::Left)
+    {
+        left = left.child(extension_item(state, item, cx));
+    }
+
+    let mut right = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
+        .h_full()
+        .flex_none()
+        .px(px(10.0));
+    for item in extension_items
+        .iter()
+        .filter(|item| item.side == muxy_core::extensions::manifest::StatusBarSide::Right)
+    {
+        right = right.child(extension_item(state, item, cx));
+    }
 
     div()
         .flex()
@@ -122,9 +144,71 @@ pub fn status_bar(
         .border_t(px(1.0))
         .border_color(theme.border)
         .child(left)
+        .child(right)
         .when_some(trailing, |bar, trailing| {
             bar.child(status_separator(state)).child(trailing)
         })
+        .into_any_element()
+}
+
+fn extension_item(
+    state: &AppState,
+    item: &crate::extensions::ExtensionStatusBarBinding,
+    cx: &mut Context<MainWindow>,
+) -> AnyElement {
+    let extension_id = item.extension_id.clone();
+    let command = item.command.clone();
+    let icon = crate::extensions::surface_view::extension_icon(
+        &item.icon,
+        &item.resource_root,
+        state.metrics.font_caption(),
+        state.theme.fg_muted,
+    );
+    let tooltip = item
+        .tooltip
+        .clone()
+        .unwrap_or_else(|| format!("{} extension action", item.item_id));
+    div()
+        .id(SharedString::from(format!(
+            "extension-statusbar-{}-{}",
+            item.extension_id, item.item_id
+        )))
+        .flex()
+        .flex_row()
+        .flex_none()
+        .items_center()
+        .gap(px(4.0))
+        .h_full()
+        .px(px(2.0))
+        .cursor_pointer()
+        .text_color(state.theme.fg_muted)
+        .hover(|style| style.text_color(state.theme.fg))
+        .tooltip({
+            let tooltip = SharedString::from(tooltip);
+            let background = state.theme.raised();
+            let foreground = state.theme.fg;
+            let border = state.theme.border;
+            move |_, cx| {
+                cx.new(|_| Tooltip::new(tooltip.clone(), background, foreground, border))
+                    .into()
+            }
+        })
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(
+                move |window: &mut MainWindow, event: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    window.run_extension_command(&extension_id, &command, Some(event.position), cx);
+                },
+            ),
+        )
+        .child(icon)
+        .children(item.text.clone().map(|text| {
+            div()
+                .text_size(state.metrics.font_footnote())
+                .font_weight(FontWeight::MEDIUM)
+                .child(SharedString::from(text))
+        }))
         .into_any_element()
 }
 
