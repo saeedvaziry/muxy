@@ -14,7 +14,7 @@ pub fn muxy_dir() -> io::Result<PathBuf> {
         }
         None => env::var_os("HOME")
             .filter(|home| !home.is_empty())
-            .map(|home| PathBuf::from(home).join("Library/Application Support/Muxy"))
+            .map(|home| PathBuf::from(home).join("Library/Application Support/Muxy Alpha"))
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is not set"))?,
     };
     fs::create_dir_all(&directory)?;

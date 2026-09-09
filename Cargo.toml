@@ -45,7 +45,7 @@ muxy-app = ["muxy-wire"]
 muxy-client = ["muxy-server-core"]
 
 [workspace.package]
-version = "0.1.0"
+version = "2.0.0-alpha-0"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT"

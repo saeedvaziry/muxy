@@ -4,3 +4,4 @@
 .DS_Store
 /spikes-archive.tar.gz
 /.plans
+__pycache__/

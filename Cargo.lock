@@ -3330,7 +3330,7 @@ dependencies = [
 
 [[package]]
 name = "muxy-app"
-version = "0.1.0"
+version = "2.0.0-alpha-0"
 dependencies = [
  "async-channel 2.5.0",
  "gpui",
@@ -3345,7 +3345,7 @@ dependencies = [
 
 [[package]]
 name = "muxy-app-core"
-version = "0.1.0"
+version = "2.0.0-alpha-0"
 dependencies = [
  "muxy-core",
  "muxy-protocol",
@@ -3358,7 +3358,7 @@ dependencies = [
 
 [[package]]
 name = "muxy-client"
-version = "0.1.0"
+version = "2.0.0-alpha-0"
 dependencies = [
  "muxy-protocol",
  "muxy-server-core",
@@ -3368,14 +3368,14 @@ dependencies = [
 
 [[package]]
 name = "muxy-core"
-version = "0.1.0"
+version = "2.0.0-alpha-0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "muxy-protocol"
-version = "0.1.0"
+version = "2.0.0-alpha-0"
 dependencies = [
  "muxy-core",
  "serde",
@@ -3383,14 +3383,14 @@ dependencies = [
 
 [[package]]
 name = "muxy-pty"
-version = "0.1.0"
+version = "2.0.0-alpha-0"
 dependencies = [
  "portable-pty",
 ]
 
 [[package]]
 name = "muxy-server"
-version = "0.1.0"
+version = "2.0.0-alpha-0"
 dependencies = [
  "log",
  "muxy-core",
@@ -3405,7 +3405,7 @@ dependencies = [
 
 [[package]]
 name = "muxy-server-core"
-version = "0.1.0"
+version = "2.0.0-alpha-0"
 dependencies = [
  "getrandom 0.3.4",
  "libproc",
@@ -3422,7 +3422,7 @@ dependencies = [
 
 [[package]]
 name = "muxy-settings"
-version = "0.1.0"
+version = "2.0.0-alpha-0"
 dependencies = [
  "muxy-core",
  "serde",
@@ -3431,18 +3431,18 @@ dependencies = [
 
 [[package]]
 name = "muxy-terminal"
-version = "0.1.0"
+version = "2.0.0-alpha-0"
 dependencies = [
  "libghostty-vt",
 ]
 
 [[package]]
 name = "muxy-transport"
-version = "0.1.0"
+version = "2.0.0-alpha-0"
 
 [[package]]
 name = "muxy-ui"
-version = "0.1.0"
+version = "2.0.0-alpha-0"
 dependencies = [
  "block2",
  "gpui",
@@ -3456,7 +3456,7 @@ dependencies = [
 
 [[package]]
 name = "muxy-wire"
-version = "0.1.0"
+version = "2.0.0-alpha-0"
 dependencies = [
  "muxy-protocol",
  "postcard",

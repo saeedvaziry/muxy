@@ -1,0 +1,165 @@
+name: Release (Alpha)
+
+on:
+  push:
+    branches: [2.x]
+
+permissions:
+  contents: read
+
+# Different commits can finish independently; reruns of one commit cannot race.
+concurrency:
+  group: release-alpha-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  LIBGHOSTTY_VT_SYS_OPTIMIZE: ReleaseFast
+  MACOSX_DEPLOYMENT_TARGET: '14.0'
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  validate:
+    if: github.repository == 'muxy-app/muxy' && !github.event.deleted
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Compute alpha version
+        id: version
+        run: python3 scripts/alpha_release.py version >> "$GITHUB_OUTPUT"
+      - name: Reject a reused version from different history
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            if [[ "$(git rev-parse "refs/tags/$TAG^{}")" != "$GITHUB_SHA" ]]; then
+              echo "Error: $TAG already points to a different commit" >&2
+              exit 1
+            fi
+          fi
+
+  build:
+    needs: [checks, validate]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            target: aarch64-apple-darwin
+            runner: macos-15
+          - arch: x86_64
+            target: x86_64-apple-darwin
+            runner: macos-15-intel
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          targets: ${{ matrix.target }}
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: alpha-${{ matrix.target }}
+      - name: Stamp the build version without committing a bump
+        run: python3 scripts/alpha_release.py stamp "$VERSION"
+      - name: Import signing certificate
+        env:
+          CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_APPLICATION_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/muxy-alpha-signing.keychain-db"
+          : "${CERTIFICATE_P12:?Developer ID certificate is required}"
+          : "${CERTIFICATE_PASSWORD:?Certificate password is required}"
+          : "${KEYCHAIN_PASSWORD:?Keychain password is required}"
+          umask 077
+          CERTIFICATE="$RUNNER_TEMP/muxy-alpha-certificate.p12"
+          trap 'rm -f "$CERTIFICATE"' EXIT
+          printf '%s' "$CERTIFICATE_P12" | base64 --decode > "$CERTIFICATE"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "$HOME/Library/Keychains/login.keychain-db"
+          security import "$CERTIFICATE" -k "$KEYCHAIN_PATH" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+      - name: Resolve signing identity
+        id: identity
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/muxy-alpha-signing.keychain-db"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk '/Developer ID Application/ {print $2; exit}')
+          if [[ -z "$IDENTITY" ]]; then
+            echo "Error: no Developer ID Application identity found" >&2
+            exit 1
+          fi
+          echo "name=$IDENTITY" >> "$GITHUB_OUTPUT"
+      - name: Build, bundle app and server, and sign
+        env:
+          SIGN_IDENTITY: ${{ steps.identity.outputs.name }}
+        run: bash scripts/build-release.sh --arch "$ARCH" --version "$VERSION" --sign-identity "$SIGN_IDENTITY"
+      - name: Notarize and verify DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash scripts/notarize-release.sh "target/alpha/$VERSION/$ARCH/Muxy-$VERSION-$ARCH.dmg"
+      - name: Upload notarized DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpha-dmg-${{ matrix.arch }}
+          path: target/alpha/${{ env.VERSION }}/${{ matrix.arch }}/*.dmg
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload app and server debug symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpha-symbols-${{ matrix.arch }}
+          path: target/alpha/${{ env.VERSION }}/${{ matrix.arch }}/*-symbols.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove signing keychain
+        if: always()
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/muxy-alpha-signing.keychain-db"
+          if [[ -f "$KEYCHAIN_PATH" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH"
+          fi
+          rm -f "$RUNNER_TEMP/muxy-alpha-certificate.p12"
+
+  release:
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: alpha-dmg-*
+          merge-multiple: true
+          path: artifacts
+      - name: Publish alpha prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: bash scripts/publish-alpha.sh "$VERSION" artifacts

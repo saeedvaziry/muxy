@@ -500,9 +500,17 @@ fn custom_paths_and_settings_are_used_without_default_directory() -> TestResult 
 }
 
 #[test]
-fn default_directory_is_created_under_home() -> TestResult {
+fn default_alpha_directory_does_not_touch_stable_storage() -> TestResult {
     let mut fixture = Fixture::new()?;
-    let directory = fixture.directory.join("Library/Application Support/Muxy");
+    let stable = fixture.directory.join("Library/Application Support/Muxy");
+    fs::create_dir_all(&stable)?;
+    fs::write(
+        stable.join("server.toml"),
+        "stable settings must not be read",
+    )?;
+    let directory = fixture
+        .directory
+        .join("Library/Application Support/Muxy Alpha");
     let socket = fixture.socket();
     let mut command = fixture.command();
     command
@@ -515,6 +523,12 @@ fn default_directory_is_created_under_home() -> TestResult {
     assert_eq!(client.request(RequestBody::Ping)?, ReplyBody::Pong);
     assert!(directory.join("server.toml").exists());
     assert!(directory.join("server.log").exists());
+    assert_eq!(
+        fs::read_to_string(stable.join("server.toml"))?,
+        "stable settings must not be read"
+    );
+    assert!(!stable.join("server.log").exists());
+    assert!(!stable.join("server.sock").exists());
     fixture.stop("-TERM")?;
     Ok(())
 }
