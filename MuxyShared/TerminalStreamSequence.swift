@@ -222,7 +222,7 @@ public enum TerminalStreamSequence {
         case 0x50:
             return hasQueryPrefix(in: bytes, range: range, introducerLength: 2, prefixes: [[0x24, 0x71], [0x2B, 0x71]])
         case 0x5F:
-            return isKittyGraphicsQuery(in: bytes, range: range)
+            return isResponseGeneratingKittyGraphicsCommand(in: bytes, range: range)
         default:
             return false
         }
@@ -299,14 +299,15 @@ public enum TerminalStreamSequence {
         return prefixes.contains { payload.starts(with: $0) }
     }
 
-    private static func isKittyGraphicsQuery(in bytes: [UInt8], range: Range<Int>) -> Bool {
+    private static func isResponseGeneratingKittyGraphicsCommand(in bytes: [UInt8], range: Range<Int>) -> Bool {
         let payloadStart = range.lowerBound + 2
         let payloadEnd = controlStringPayloadEnd(in: bytes, range: range)
         guard payloadStart < payloadEnd, bytes[payloadStart] == 0x47 else { return false }
         let header = bytes[(payloadStart + 1) ..< payloadEnd].prefix { $0 != 0x3B }
-        return String(decoding: header, as: UTF8.self)
+        let quiet = String(decoding: header, as: UTF8.self)
             .split(separator: ",")
-            .contains("a=q")
+            .last { $0.starts(with: "q=") }
+        return quiet != "q=2"
     }
 
     private static func controlStringPayloadEnd(in bytes: [UInt8], range: Range<Int>) -> Int {

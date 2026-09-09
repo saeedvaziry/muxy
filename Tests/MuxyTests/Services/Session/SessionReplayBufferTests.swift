@@ -255,6 +255,10 @@ struct SessionReplayBufferTests {
             "\u{1B}]10;?\u{1B}\\",
             "\u{1B}P+q544e\u{1B}\\",
             "\u{1B}P$qm\u{1B}\\",
+            "\u{1B}_Ga=q,i=1,s=1,v=1,f=24;AAAA\u{1B}\\",
+            "\u{1B}_Ga=t,i=1,s=1,v=1,f=24;AAAA\u{1B}\\",
+            "\u{1B}_Ga=t,i=1,s=1,v=1,f=24,q=0;AAAA\u{1B}\\",
+            "\u{1B}_Ga=t,i=1,s=1,v=1,f=24,q=1;AAAA\u{1B}\\",
             "\u{1B}Z",
         ].joined()
         let payload = Array(("before" + queries + "after").utf8)
@@ -265,7 +269,7 @@ struct SessionReplayBufferTests {
 
     @Test("replay preserves terminal state changes")
     func replayPreservesTerminalStateChanges() {
-        let payload = Array("before\u{1B}[31m\u{1B}[2J\u{1B}]0;?title\u{7}\u{1B}]4;0;rgb:ffff/0000/0000\u{7}after".utf8)
+        let payload = Array("before\u{1B}[31m\u{1B}[2J\u{1B}]0;?title\u{7}\u{1B}]4;0;rgb:ffff/0000/0000\u{7}\u{1B}_Ga=t,i=1,s=1,v=1,f=24,q=2;AAAA\u{1B}\\after".utf8)
         var buffer = SessionReplayBuffer(capacity: payload.count)
         buffer.append(payload)
         #expect(buffer.replayBytes == payload)
