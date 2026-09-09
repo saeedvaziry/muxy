@@ -67,13 +67,25 @@ struct WorkspacePathResolverTests {
         let missing = physicalHome + "/repos/missing/nested"
 
         let resolutions = try await resolver.resolve(
-            paths: ["~/repos/app feature's", "../app feature's", alias.path, "~/repos/missing/nested"],
+            paths: [
+                "~/repos/app feature's",
+                "../app feature's",
+                alias.path,
+                "~/repos/missing/nested",
+                "~/Code/org/.muxy-worktrees/app/feature"
+            ],
             relativeTo: "~/repos/app",
             context: .ssh(destination),
             timeout: 5
         )
 
-        #expect(resolutions.map(\.path) == [resolvedWorktree, resolvedWorktree, resolvedWorktree, missing])
+        #expect(resolutions.map(\.path) == [
+            resolvedWorktree,
+            resolvedWorktree,
+            resolvedWorktree,
+            missing,
+            physicalHome + "/Code/org/.muxy-worktrees/app/feature"
+        ])
     }
 
     @Test("absolute SSH paths do not require HOME")

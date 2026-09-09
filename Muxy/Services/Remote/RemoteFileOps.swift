@@ -83,33 +83,43 @@ struct SSHFileOps: RemoteFileOps {
     }
 
     func exists(at path: String) async -> Bool {
-        let quoted = RemoteCommandBuilder.quoteRemotePath(path)
-        let quotedParent = RemoteCommandBuilder.quoteRemotePath(parentPath(of: path))
         let result = try? await SSHCommandRunner.run(
             destination: destination,
-            remoteCommand: presenceCommand(path: quoted, parent: quotedParent)
+            remoteCommand: Self.presenceCommand(path: path)
         )
         return result?.status != 1
     }
 
     func exists(at path: String, timeout: TimeInterval) async throws -> Bool {
-        let quoted = RemoteCommandBuilder.quoteRemotePath(path)
-        let quotedParent = RemoteCommandBuilder.quoteRemotePath(parentPath(of: path))
         let result = try await SSHCommandRunner.run(
             destination: destination,
-            remoteCommand: presenceCommand(path: quoted, parent: quotedParent),
+            remoteCommand: Self.presenceCommand(path: path),
             timeout: timeout
         )
         return result.status != 1
     }
 
-    private func parentPath(of path: String) -> String {
-        let parent = NSString(string: path).deletingLastPathComponent
-        return parent.isEmpty ? "." : parent
-    }
-
-    private func presenceCommand(path: String, parent: String) -> String {
-        "if [ -e \(path) ] || [ -L \(path) ]; then exit 0; fi; [ ! -e \(parent) ] && exit 1; [ -x \(parent) ] && exit 1; exit 2"
+    static func presenceCommand(path: String) -> String {
+        let quotedPath = RemoteCommandBuilder.quoteRemotePath(path)
+        return """
+        __muxy_path=\(quotedPath)
+        if [ -e "$__muxy_path" ] || [ -L "$__muxy_path" ]; then exit 0; fi
+        case "$__muxy_path" in
+          */*) __muxy_probe=${__muxy_path%/*}; [ -n "$__muxy_probe" ] || __muxy_probe=/ ;;
+          *) __muxy_probe=. ;;
+        esac
+        while [ ! -e "$__muxy_probe" ] && [ ! -L "$__muxy_probe" ]; do
+          [ "$__muxy_probe" = / ] && exit 2
+          case "$__muxy_probe" in
+            */*) __muxy_parent=${__muxy_probe%/*}; [ -n "$__muxy_parent" ] || __muxy_parent=/ ;;
+            *) __muxy_parent=. ;;
+          esac
+          [ "$__muxy_parent" = "$__muxy_probe" ] && exit 2
+          __muxy_probe=$__muxy_parent
+        done
+        [ -x "$__muxy_probe" ] && exit 1
+        exit 2
+        """
     }
 
     private func run(_ remoteCommand: String, timeout: TimeInterval = SSHCommandRunner.defaultTimeout) async throws {
