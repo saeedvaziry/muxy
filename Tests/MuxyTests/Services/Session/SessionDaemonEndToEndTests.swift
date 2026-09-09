@@ -67,6 +67,31 @@ struct SessionDaemonEndToEndTests {
         }
     }
 
+    @Test("attach client does not receive response-generating Kitty commands from replay")
+    func attachClientFiltersKittyCommandsDuringReplay() throws {
+        try withHarness { harness in
+            let identifier = try makeIdentifier()
+            let query = "\u{1B}_Ga=t,i=1,s=1,v=1,f=24;AAAA\u{1B}\\"
+            let first = try #require(SessionTestConnection(socketPath: harness.socketPath))
+            first.send(harness.attachRequest(
+                identifier: identifier,
+                command: "sh -c \"printf 'BEFORE\\033_Ga=t,i=1,s=1,v=1,f=24;AAAA\\033\\\\AFTER'; sleep 30\""
+            ))
+            let initialOutput = first.collectOutput(timeout: 5) { $0.contains("AFTER") }
+            #expect(initialOutput.contains(query))
+            first.close()
+
+            let replayed = try harness.runAttachClient(
+                identifier: identifier,
+                command: "echo SHOULD_NOT_RUN",
+                timeout: 1
+            ).output
+            #expect(replayed.contains("BEFOREAFTER"))
+            #expect(!replayed.contains(query))
+            #expect(!replayed.contains("SHOULD_NOT_RUN"))
+        }
+    }
+
     @Test("uses fallback pty size for a new session with a transient attach size")
     func usesFallbackSizeForTransientInitialAttach() throws {
         try withHarness { harness in

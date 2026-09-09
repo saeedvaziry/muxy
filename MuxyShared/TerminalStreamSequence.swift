@@ -80,6 +80,36 @@ public enum TerminalStreamSequence {
         return trailingUTF8SafeEnd(in: bytes, endingAt: bytes.count)
     }
 
+    public static func removingResponseQueries(from bytes: [UInt8]) -> [UInt8] {
+        var output: [UInt8] = []
+        output.reserveCapacity(bytes.count)
+        var retainedStart = 0
+        var index = 0
+        while index < bytes.count {
+            if bytes[index] == 0x05 {
+                output.append(contentsOf: bytes[retainedStart ..< index])
+                index += 1
+                retainedStart = index
+                continue
+            }
+            guard bytes[index] == 0x1B,
+                  let end = escapeTerminator(in: bytes, from: index)
+            else {
+                index += 1
+                continue
+            }
+            guard isResponseQuery(in: bytes, range: index ..< end) else {
+                index = end
+                continue
+            }
+            output.append(contentsOf: bytes[retainedStart ..< index])
+            index = end
+            retainedStart = end
+        }
+        output.append(contentsOf: bytes[retainedStart...])
+        return output
+    }
+
     public static func trailingUTF8SafeEnd(in bytes: [UInt8], endingAt end: Int) -> Int {
         guard end > 0 else { return 0 }
         var sequenceStart = end - 1
@@ -178,6 +208,113 @@ public enum TerminalStreamSequence {
             cursor += 1
         }
         return nil
+    }
+
+    private static func isResponseQuery(in bytes: [UInt8], range: Range<Int>) -> Bool {
+        guard range.count >= 2 else { return false }
+        switch bytes[range.lowerBound + 1] {
+        case 0x5A:
+            return true
+        case 0x5B:
+            return isCSIResponseQuery(in: bytes, range: range)
+        case 0x5D:
+            return isOSCResponseQuery(in: bytes, range: range)
+        case 0x50:
+            return hasQueryPrefix(in: bytes, range: range, introducerLength: 2, prefixes: [[0x24, 0x71], [0x2B, 0x71]])
+        case 0x5F:
+            return isResponseGeneratingKittyGraphicsCommand(in: bytes, range: range)
+        default:
+            return false
+        }
+    }
+
+    private static func isCSIResponseQuery(in bytes: [UInt8], range: Range<Int>) -> Bool {
+        guard range.count >= 3 else { return false }
+        let final = bytes[range.upperBound - 1]
+        let body = bytes[(range.lowerBound + 2) ..< (range.upperBound - 1)]
+        switch final {
+        case 0x63,
+             0x6E,
+             0x78:
+            return true
+        case 0x70,
+             0x77,
+             0x75:
+            return body.last == 0x24 || (final == 0x75 && body.elementsEqual([0x3F]))
+        case 0x71:
+            return body.first == 0x3E
+        case 0x74:
+            return isWindowReportQuery(body)
+        case 0x79:
+            return body.last == 0x2A
+        case 0x53:
+            return isGraphicsAttributeQuery(body)
+        default:
+            return false
+        }
+    }
+
+    private static func isWindowReportQuery(_ body: ArraySlice<UInt8>) -> Bool {
+        let operation = body.prefix { $0 >= 0x30 && $0 <= 0x39 }
+        guard !operation.isEmpty, let value = Int(String(decoding: operation, as: UTF8.self)) else { return false }
+        return [11, 13, 14, 15, 16, 18, 19, 20, 21].contains(value)
+    }
+
+    private static func isGraphicsAttributeQuery(_ body: ArraySlice<UInt8>) -> Bool {
+        guard body.first == 0x3F else { return false }
+        let parameters = String(decoding: body.dropFirst(), as: UTF8.self).split(separator: ";", omittingEmptySubsequences: false)
+        return parameters.count >= 2 && parameters[1] == "1"
+    }
+
+    private static func isOSCResponseQuery(in bytes: [UInt8], range: Range<Int>) -> Bool {
+        let payloadStart = range.lowerBound + 2
+        let payloadEnd = controlStringPayloadEnd(in: bytes, range: range)
+        guard payloadStart < payloadEnd else { return false }
+        let payload = bytes[payloadStart ..< payloadEnd]
+        guard let separator = payload.firstIndex(of: 0x3B) else { return false }
+        let command = payload[..<separator]
+        guard !command.isEmpty, command.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }) else { return false }
+        var fieldStart = payload.index(after: separator)
+        while fieldStart <= payload.endIndex {
+            let fieldEnd = payload[fieldStart...].firstIndex(of: 0x3B) ?? payload.endIndex
+            if payload[fieldStart ..< fieldEnd].elementsEqual([0x3F]) {
+                return true
+            }
+            guard fieldEnd < payload.endIndex else { return false }
+            fieldStart = payload.index(after: fieldEnd)
+        }
+        return false
+    }
+
+    private static func hasQueryPrefix(
+        in bytes: [UInt8],
+        range: Range<Int>,
+        introducerLength: Int,
+        prefixes: [[UInt8]]
+    ) -> Bool {
+        let payloadStart = range.lowerBound + introducerLength
+        let payloadEnd = controlStringPayloadEnd(in: bytes, range: range)
+        guard payloadStart < payloadEnd else { return false }
+        let payload = bytes[payloadStart ..< payloadEnd]
+        return prefixes.contains { payload.starts(with: $0) }
+    }
+
+    private static func isResponseGeneratingKittyGraphicsCommand(in bytes: [UInt8], range: Range<Int>) -> Bool {
+        let payloadStart = range.lowerBound + 2
+        let payloadEnd = controlStringPayloadEnd(in: bytes, range: range)
+        guard payloadStart < payloadEnd, bytes[payloadStart] == 0x47 else { return false }
+        let header = bytes[(payloadStart + 1) ..< payloadEnd].prefix { $0 != 0x3B }
+        let quiet = String(decoding: header, as: UTF8.self)
+            .split(separator: ",")
+            .last { $0.starts(with: "q=") }
+        return quiet != "q=2"
+    }
+
+    private static func controlStringPayloadEnd(in bytes: [UInt8], range: Range<Int>) -> Int {
+        if bytes[range.upperBound - 1] == 0x07 {
+            return range.upperBound - 1
+        }
+        return max(range.lowerBound, range.upperBound - 2)
     }
 
     public static func nextAlternateScreenSequence(in bytes: [UInt8], from index: Int, entering: Bool) -> Range<Int>? {
