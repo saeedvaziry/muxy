@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 
 use muxy_protocol::{
     AttachSnapshot, Cursor, HistoryCursor, HistoryPage, Modes, Row, Run, SavedScreen, ScreenFrame,
@@ -7,6 +7,8 @@ use muxy_protocol::{
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunGrid {
+    pub prompts: BTreeSet<usize>,
+    pub prompt_state: ScreenPrompts,
     pub links: ScreenLinks,
     pub size: Size,
     pub rows: Vec<Vec<Run>>,
@@ -21,6 +23,8 @@ pub struct RunGrid {
 impl RunGrid {
     pub fn from_snapshot(snapshot: &AttachSnapshot) -> Self {
         let mut grid = Self {
+            prompts: snapshot.prompts.iter().copied().map(usize::from).collect(),
+            prompt_state: ScreenPrompts::default(),
             links: ScreenLinks::default(),
             size: snapshot.size,
             rows: blank_rows(snapshot.size.rows),
@@ -37,6 +41,13 @@ impl RunGrid {
 
     pub fn apply(&mut self, frame: &ScreenFrame) {
         self.links.frame_seq = frame.seq;
+        self.prompt_state.frame_seq = frame.seq;
+        if frame.reset || self.prompt_state.seq > frame.seq {
+            self.prompts.retain(|row| *row < self.history.len());
+        }
+        if self.prompt_state.pending && self.prompt_state.seq <= frame.seq {
+            self.apply_screen_prompts();
+        }
         self.history_fresh = false;
         if frame.reset {
             let rows = usize::from(self.size.rows).max(
@@ -56,6 +67,9 @@ impl RunGrid {
 
     pub fn resize(&mut self, size: Size) {
         self.links.rows.clear();
+        self.prompts.clear();
+        self.prompt_state.pending = false;
+        self.prompt_state.rows.clear();
         self.size = size;
         self.rows = blank_rows(size.rows);
         self.history.clear();
@@ -67,6 +81,8 @@ impl RunGrid {
         let mut cursor = screen.cursor;
         cursor.visible = false;
         Self {
+            prompts: BTreeSet::new(),
+            prompt_state: ScreenPrompts::default(),
             links: ScreenLinks::default(),
             size: screen.size,
             rows: screen.rows.into_iter().map(|row| row.runs).collect(),
@@ -80,6 +96,8 @@ impl RunGrid {
     }
 
     pub fn replace_history(&mut self, page: HistoryPage) {
+        self.prompts = page.prompts.into_iter().map(usize::from).collect();
+        self.prompt_state.pending = false;
         if let Some(screen) = page.screen {
             self.links.rows.clear();
             self.size = screen.size;
@@ -93,10 +111,52 @@ impl RunGrid {
     }
 
     pub fn fetch_older(&mut self, page: HistoryPage) {
+        self.prompts = self
+            .prompts
+            .iter()
+            .map(|row| row + page.rows.len())
+            .chain(page.prompts.into_iter().map(usize::from))
+            .collect();
         for row in page.rows.into_iter().rev() {
             self.history.push_front(row);
         }
         self.history_cursor = page.next;
+    }
+
+    pub fn clear_history(&mut self) {
+        let history = self.history.len();
+        self.prompts = self
+            .prompts
+            .iter()
+            .filter_map(|row| row.checked_sub(history))
+            .collect();
+        self.history.clear();
+        self.history_cursor = None;
+        self.history_fresh = false;
+    }
+
+    pub fn screen_prompts(&mut self, seq: u64, rows: Vec<u16>) {
+        if seq < self.prompt_state.seq {
+            return;
+        }
+        self.prompt_state.seq = seq;
+        self.prompt_state.rows = rows;
+        self.prompt_state.pending = true;
+        if seq <= self.prompt_state.frame_seq {
+            self.apply_screen_prompts();
+        }
+    }
+
+    fn apply_screen_prompts(&mut self) {
+        self.prompts.retain(|row| *row < self.history.len());
+        self.prompts.extend(
+            self.prompt_state
+                .rows
+                .iter()
+                .filter(|row| **row < self.size.rows)
+                .map(|row| self.history.len() + usize::from(*row)),
+        );
+        self.prompt_state.pending = false;
     }
 
     pub fn content_row(&self, index: usize) -> Option<&[Run]> {
@@ -189,6 +249,7 @@ mod tests {
 
     fn snapshot() -> AttachSnapshot {
         AttachSnapshot {
+            prompts: Vec::new(),
             channel: ChannelId(1),
             size: Size { cols: 10, rows: 3 },
             rows: vec![row(0, "first"), row(2, "third")],
@@ -310,6 +371,7 @@ mod tests {
             (["one", "two"], None),
         ] {
             grid.fetch_older(HistoryPage {
+                prompts: Vec::new(),
                 rows: vec![row(0, values[0]), row(1, values[1])],
                 next,
                 total_rows: 6,
@@ -365,5 +427,115 @@ mod tests {
         grid.links.replace(4, links);
         grid.resize(Size { cols: 5, rows: 2 });
         assert!(grid.links.row(1, grid.size).is_empty());
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ScreenPrompts {
+    rows: Vec<u16>,
+    seq: u64,
+    frame_seq: u64,
+    pending: bool,
+}
+
+#[cfg(test)]
+mod prompt_tests {
+    use super::*;
+    use muxy_protocol::{ChannelId, ServerPath};
+
+    fn grid() -> RunGrid {
+        RunGrid::from_snapshot(&AttachSnapshot {
+            prompts: vec![0, 3],
+            channel: ChannelId(1),
+            size: Size { cols: 10, rows: 4 },
+            rows: vec![],
+            cursor: Cursor {
+                row: 1,
+                col: 0,
+                visible: true,
+            },
+            modes: Modes::default(),
+            title: String::new(),
+            directory: ServerPath(b"/tmp".to_vec()),
+            history: vec![
+                Row {
+                    index: 0,
+                    runs: vec![]
+                };
+                2
+            ],
+            history_cursor: Some(HistoryCursor(2)),
+            history_total: 4,
+        })
+    }
+
+    #[test]
+    fn pages_prepend_shift_replace_and_clear_prompt_coordinates() {
+        let mut grid = grid();
+        grid.fetch_older(HistoryPage {
+            prompts: vec![1],
+            rows: vec![
+                Row {
+                    index: 0,
+                    runs: vec![]
+                };
+                2
+            ],
+            next: None,
+            total_rows: 4,
+            screen: None,
+        });
+        assert_eq!(grid.prompts, BTreeSet::from([1, 2, 5]));
+        grid.clear_history();
+        assert_eq!(grid.prompts, BTreeSet::from([1]));
+        assert!(!grid.history_fresh);
+        grid.replace_history(HistoryPage {
+            prompts: vec![0, 4],
+            rows: vec![
+                Row {
+                    index: 0,
+                    runs: vec![]
+                };
+                2
+            ],
+            next: None,
+            total_rows: 2,
+            screen: None,
+        });
+        assert_eq!(grid.prompts, BTreeSet::from([0, 4]));
+        grid.resize(Size { cols: 8, rows: 2 });
+        assert!(grid.prompts.is_empty());
+        assert!(grid.history.is_empty());
+    }
+
+    #[test]
+    fn future_marks_wait_for_frames_and_reset_frames_cannot_reuse_old_marks() {
+        let mut grid = grid();
+        let frame = |seq, reset| ScreenFrame {
+            seq,
+            reset,
+            rows: vec![],
+            cursor: Cursor {
+                row: 1,
+                col: 0,
+                visible: true,
+            },
+            modes: Modes::default(),
+        };
+        grid.screen_prompts(3, vec![2]);
+        assert_eq!(grid.prompts, BTreeSet::from([0, 3]));
+        grid.apply(&frame(2, false));
+        assert_eq!(grid.prompts, BTreeSet::from([0]));
+        grid.apply(&frame(3, true));
+        assert_eq!(grid.prompts, BTreeSet::from([0, 4]));
+        grid.screen_prompts(1, vec![0]);
+        assert_eq!(grid.prompts, BTreeSet::from([0, 4]));
+        grid.screen_prompts(5, vec![]);
+        grid.apply(&frame(5, false));
+        assert_eq!(grid.prompts, BTreeSet::from([0]));
+        grid.screen_prompts(6, vec![1]);
+        grid.apply(&frame(6, false));
+        grid.apply(&frame(7, true));
+        assert_eq!(grid.prompts, BTreeSet::from([0]));
     }
 }

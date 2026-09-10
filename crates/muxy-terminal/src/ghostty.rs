@@ -283,17 +283,40 @@ impl Terminal {
     }
 
     pub fn screen(&mut self) -> Result<Vec<Row>, TerminalError> {
+        self.screen_with_prompts().map(|(rows, _)| rows)
+    }
+
+    pub fn screen_prompts(&mut self) -> Result<Vec<u16>, TerminalError> {
+        let query = |error| TerminalError::wrap(TerminalStep::Render, error);
+        let snapshot = self.render.update(&self.engine).map_err(query)?;
+        let mut iteration = self.rows.update(&snapshot).map_err(query)?;
+        let mut prompts = Vec::new();
+        let mut index = 0;
+        while let Some(row) = iteration.next() {
+            if is_prompt(row).map_err(query)? {
+                prompts.push(index);
+            }
+            index += 1;
+        }
+        Ok(prompts)
+    }
+
+    fn screen_with_prompts(&mut self) -> Result<(Vec<Row>, Vec<u16>), TerminalError> {
         let render = |error| TerminalError::wrap(TerminalStep::Render, error);
         let snapshot = self.render.update(&self.engine).map_err(render)?;
         let mut iteration = self.rows.update(&snapshot).map_err(render)?;
         let mut rows = Vec::with_capacity(usize::from(snapshot.rows().map_err(render)?));
+        let mut prompts = Vec::new();
         let mut index = 0;
         while let Some(row) = iteration.next() {
+            if is_prompt(row).map_err(render)? {
+                prompts.push(index);
+            }
             let runs = row_runs(&mut self.cells, row, &mut self.text).map_err(render)?;
             rows.push(Row { index, runs });
             index += 1;
         }
-        Ok(rows)
+        Ok((rows, prompts))
     }
 
     pub fn take_changed_rows(&mut self) -> Result<Vec<Row>, TerminalError> {
@@ -423,9 +446,16 @@ impl Terminal {
     }
 
     pub fn history(&mut self, range: Range<usize>) -> Result<Vec<Row>, TerminalError> {
+        self.history_with_prompts(range).map(|(rows, _)| rows)
+    }
+
+    pub fn history_with_prompts(
+        &mut self,
+        range: Range<usize>,
+    ) -> Result<(Vec<Row>, Vec<u16>), TerminalError> {
         let end = range.end.min(self.history_rows()?);
         if range.start >= end {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         }
         let query = |error| TerminalError::wrap(TerminalStep::History, error);
         let snapshot = self.render.update(&self.engine).map_err(query)?;
@@ -437,14 +467,22 @@ impl Terminal {
         }
         let captured = (|| {
             let mut history = Vec::with_capacity(end - range.start);
+            let mut prompts = Vec::new();
             for start in (range.start..end).step_by(usize::from(self.size.rows)) {
                 self.engine.scroll_viewport(ScrollViewport::Row(start));
-                for mut row in self.screen()?.into_iter().take(end - start) {
+                let (screen, screen_prompts) = self.screen_with_prompts()?;
+                prompts.extend(
+                    screen_prompts
+                        .into_iter()
+                        .filter(|row| usize::from(*row) < end - start)
+                        .filter_map(|row| u16::try_from(history.len() + usize::from(row)).ok()),
+                );
+                for mut row in screen.into_iter().take(end - start) {
                     row.index = u16::try_from(history.len()).unwrap_or(u16::MAX);
                     history.push(row);
                 }
             }
-            Ok(history)
+            Ok((history, prompts))
         })();
         self.engine.scroll_viewport(ScrollViewport::Bottom);
         let snapshot = self.render.update(&self.engine).map_err(query)?;
@@ -607,4 +645,12 @@ fn color(color: StyleColor) -> Color {
         StyleColor::Palette(index) => Color::Indexed(index.0),
         StyleColor::Rgb(rgb) => Color::Rgb(rgb.r, rgb.g, rgb.b),
     }
+}
+
+fn is_prompt(row: &RowIteration<'_, '_>) -> EngineResult<bool> {
+    let raw = row.raw_row()?;
+    Ok(
+        raw.semantic_prompt()? == libghostty_vt::screen::RowSemanticPrompt::Prompt
+            && !raw.is_wrap_continuation()?,
+    )
 }

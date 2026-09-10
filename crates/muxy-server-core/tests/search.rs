@@ -20,6 +20,7 @@ impl Fixture {
         let (events, _) = mpsc::channel();
         let registry = Registry::new(
             ServerSettings {
+                shell_integration: false,
                 default_shell: Some(PathBuf::from("/bin/sh")),
                 history_budget_bytes: budget,
             },

@@ -230,6 +230,7 @@ impl Archive {
             .1
         };
         Ok(HistoryPage {
+            prompts: Vec::new(),
             rows,
             next,
             total_rows: total as u64,
@@ -432,7 +433,12 @@ pub(crate) fn bound_history_page(
     let screen_size = postcard::experimental::serialized_size(&page.screen).map_err(size_error)?;
     let mut used = u64::try_from(screen_size)
         .unwrap_or(u64::MAX)
-        .saturating_add(128);
+        .saturating_add(128)
+        .saturating_add(
+            u64::try_from(page.prompts.len())
+                .unwrap_or(u64::MAX)
+                .saturating_mul(3),
+        );
     let mut keep = 0_u16;
     for row in page.rows.iter().rev() {
         let size = postcard::experimental::serialized_size(row).map_err(size_error)?;
@@ -451,7 +457,17 @@ pub(crate) fn bound_history_page(
             "history row exceeds the page size limit",
         ));
     }
-    page.rows.drain(..page.rows.len() - usize::from(keep));
+    let removed = page.rows.len() - usize::from(keep);
+    page.prompts = page
+        .prompts
+        .into_iter()
+        .filter_map(|row| {
+            usize::from(row)
+                .checked_sub(removed)
+                .and_then(|row| u16::try_from(row).ok())
+        })
+        .collect();
+    page.rows.drain(..removed);
     for (index, row) in page.rows.iter_mut().enumerate() {
         row.index = u16::try_from(index).unwrap_or(u16::MAX);
     }
@@ -686,6 +702,7 @@ mod tests {
             7,
             HistoryCursor(0),
             HistoryPage {
+                prompts: vec![0, 499],
                 rows: (0..500)
                     .map(|index| Row {
                         index,
@@ -701,6 +718,7 @@ mod tests {
         assert!(!page.rows.is_empty());
         assert!(postcard::experimental::serialized_size(&page)? < usize::try_from(SCREEN_LIMIT)?);
         let kept = page.rows.len();
+        assert_eq!(page.prompts, [u16::try_from(kept - 1)?]);
         let (older, next) =
             history_range(session, 7, page.next.ok_or("missing cursor")?, 500, 500)?;
         assert_eq!(older, 0..500 - kept);

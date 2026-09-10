@@ -33,6 +33,7 @@ pub(crate) enum Command {
     TerminalCopy(muxy_app_core::PaneId),
     TerminalPaste(muxy_app_core::PaneId),
     TerminalSelectAll(muxy_app_core::PaneId),
+    TerminalSelectCommandOutput(muxy_app_core::PaneId),
     CopyPath(muxy_app_core::ProjectId),
     RevealPath(muxy_app_core::ProjectId),
     EditProject(muxy_app_core::ProjectId, super::project_editor::Field),
@@ -141,12 +142,16 @@ impl AppModel {
             Command::Dismiss => {}
             Command::TerminalCopy(id)
             | Command::TerminalPaste(id)
-            | Command::TerminalSelectAll(id) => {
+            | Command::TerminalSelectAll(id)
+            | Command::TerminalSelectCommandOutput(id) => {
                 if let Some(pane) = self.grids.get(&id) {
                     pane.view.update(cx, |pane, cx| match command {
                         Command::TerminalCopy(_) => pane.copy_selection(cx),
                         Command::TerminalPaste(_) => pane.paste_clipboard(cx),
                         Command::TerminalSelectAll(_) => pane.select_all(cx),
+                        Command::TerminalSelectCommandOutput(_) => {
+                            pane.select_command_output(Some(position), cx);
+                        }
                         _ => {}
                     });
                 }

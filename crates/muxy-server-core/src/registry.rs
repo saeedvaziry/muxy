@@ -34,6 +34,7 @@ pub enum ServerEvent {
 #[derive(Debug)]
 pub struct Registry {
     settings: ServerSettings,
+    shell_integration: Option<crate::ShellIntegration>,
     events: Sender<ServerEvent>,
     sessions: Sessions,
     completed: Arc<Condvar>,
@@ -45,6 +46,7 @@ impl Registry {
         Self {
             archive: Archive::memory(settings.history_budget_bytes),
             settings,
+            shell_integration: None,
             events,
             sessions: Sessions::default(),
             completed: Arc::default(),
@@ -61,6 +63,12 @@ impl Registry {
             archive,
             ..Self::new(settings, events)
         })
+    }
+
+    #[must_use]
+    pub fn with_shell_integration(mut self, integration: crate::ShellIntegration) -> Self {
+        self.shell_integration = Some(integration);
+        self
     }
 
     pub fn settings(&self) -> &ServerSettings {
@@ -104,24 +112,29 @@ impl Registry {
         let listing = Arc::clone(&self.sessions);
         let events = self.events.clone();
         let completed = Arc::clone(&self.completed);
-        let handle =
-            spawn_shell(&self.settings, directory, session::pty_size(size)).and_then(|pty| {
-                session::start(
-                    info.clone(),
-                    pty,
-                    size,
-                    budget,
-                    self.archive.clone(),
-                    colors,
-                    move |reason| {
-                        let mut state = lock(&listing);
-                        state.sessions.remove(&id);
-                        state.starting.remove(&id);
-                        let _ = events.send(ServerEvent::SessionEnded { id, reason });
-                        completed.notify_all();
-                    },
-                )
-            });
+        let handle = spawn_shell(
+            &self.settings,
+            self.shell_integration.as_ref(),
+            directory,
+            session::pty_size(size),
+        )
+        .and_then(|pty| {
+            session::start(
+                info.clone(),
+                pty,
+                size,
+                budget,
+                self.archive.clone(),
+                colors,
+                move |reason| {
+                    let mut state = lock(&listing);
+                    state.sessions.remove(&id);
+                    state.starting.remove(&id);
+                    let _ = events.send(ServerEvent::SessionEnded { id, reason });
+                    completed.notify_all();
+                },
+            )
+        });
         let mut state = lock(&self.sessions);
         let starting = state.starting.remove(&id);
         self.completed.notify_all();

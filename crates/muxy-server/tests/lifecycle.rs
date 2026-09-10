@@ -312,7 +312,10 @@ fn lifecycle_serves_shell_logs_and_stops_every_session() -> TestResult {
         matches!(observer.request(RequestBody::ListSessions)?, ReplyBody::Sessions(sessions) if sessions.len() == 2)
     );
     let defaults = fs::read_to_string(fixture.directory.join("server.toml"))?;
-    assert_eq!(defaults.trim(), "history_budget_bytes = 16777216");
+    assert_eq!(
+        defaults.trim(),
+        "history_budget_bytes = 16777216\nshell_integration = true"
+    );
     fixture.signal("-TERM")?;
     creator.ended(&[first, second], ExitReason::ServerStopped)?;
     observer.ended(&[first, second], ExitReason::ServerStopped)?;
@@ -582,5 +585,57 @@ fn fatal_protocol_errors_are_logged_before_and_after_hello() -> TestResult {
     let log = fixture.log()?;
     assert!(log.contains("fatal protocol error: expected Hello on control"));
     assert!(log.contains("fatal protocol error: misplaced client message"));
+    Ok(())
+}
+
+#[test]
+fn shell_hooks_are_socket_relative_and_the_setting_controls_new_shells() -> TestResult {
+    let mut fixture = Fixture::new()?;
+    let home = fixture.directory.join("home");
+    fs::create_dir(&home)?;
+    fs::write(home.join(".zshrc"), "PS1='muxy-lifecycle> '\n")?;
+    for enabled in [true, false] {
+        fs::write(
+            fixture.directory.join("server.toml"),
+            format!("default_shell = '/bin/zsh'\nshell_integration = {enabled}\n"),
+        )?;
+        let mut command = fixture.command();
+        command.env("HOME", &home).env("ZDOTDIR", &home);
+        fixture.start_command(command, &fixture.socket())?;
+        let mut client = Client::new(&fixture.socket())?;
+        let session = client.create(&home)?;
+        let mut observed = false;
+        wait_until(|| {
+            let ReplyBody::Attached { snapshot, .. } = client.request(RequestBody::Attach {
+                session,
+                size: SIZE,
+            })?
+            else {
+                return Err("missing snapshot".into());
+            };
+            let ready = snapshot
+                .rows
+                .iter()
+                .flat_map(|row| &row.runs)
+                .any(|run| run.text.contains("muxy-lifecycle>"));
+            observed = !snapshot.prompts.is_empty();
+            client.request(RequestBody::Detach(snapshot.channel))?;
+            Ok(ready)
+        })?;
+        assert_eq!(observed, enabled);
+        assert!(
+            fixture
+                .directory
+                .join("shell-integration/zsh/.zshenv")
+                .is_file()
+        );
+        assert!(
+            fixture
+                .directory
+                .join("shell-integration/fish/vendor_conf.d/muxy.fish")
+                .is_file()
+        );
+        fixture.stop("-TERM")?;
+    }
     Ok(())
 }

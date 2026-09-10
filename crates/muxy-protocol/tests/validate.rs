@@ -336,6 +336,9 @@ fn samples_cover_every_message_variant_once_and_use_the_right_channel() {
             Message::Metadata(MetadataEvent::History { .. }) => {
                 ("HistoryMetadata", ChannelKind::Session)
             }
+            Message::Metadata(MetadataEvent::ScreenPrompts { .. }) => {
+                ("ScreenPrompts", ChannelKind::Session)
+            }
             Message::Metadata(MetadataEvent::Links { .. }) => ("Links", ChannelKind::Session),
             Message::Metadata(MetadataEvent::InputModes(_)) => ("InputModes", ChannelKind::Session),
             Message::Metadata(MetadataEvent::CursorBlinking(_)) => {
@@ -362,6 +365,7 @@ fn samples_cover_every_message_variant_once_and_use_the_right_channel() {
             "HistoryReply",
             "HistoryAttach",
             "HistoryMetadata",
+            "ScreenPrompts",
             "Links",
             "FrameAck",
             "HelloReply",
@@ -435,6 +439,7 @@ fn reply(body: ReplyBody) -> Message {
 
 fn snapshot() -> AttachSnapshot {
     AttachSnapshot {
+        prompts: Vec::new(),
         channel: ChannelId(1),
         size: Size { cols: 1, rows: 1 },
         rows: vec![Row {
@@ -493,6 +498,7 @@ fn history_limits_and_page_shape_are_validated() {
         Err(ErrorCode::UnknownChannel)
     );
     let valid = HistoryPage {
+        prompts: Vec::new(),
         rows: snapshot().rows,
         next: Some(HistoryCursor(3)),
         total_rows: 5,
@@ -512,10 +518,12 @@ fn history_limits_and_page_shape_are_validated() {
             ..valid.clone()
         },
         HistoryPage {
+            prompts: Vec::new(),
             rows: vec![],
             ..valid.clone()
         },
         HistoryPage {
+            prompts: Vec::new(),
             rows: vec![Row {
                 index: 1,
                 runs: vec![],
@@ -523,6 +531,7 @@ fn history_limits_and_page_shape_are_validated() {
             ..valid.clone()
         },
         HistoryPage {
+            prompts: Vec::new(),
             rows: vec![Row {
                 index: 0,
                 runs: vec![Run {

@@ -709,7 +709,8 @@ fn resize_replaces_old_pending_rows_and_correlates_pipelined_requests() -> TestR
                 _,
                 Message::Metadata(
                     muxy_protocol::MetadataEvent::History { .. }
-                    | muxy_protocol::MetadataEvent::Links { .. },
+                    | muxy_protocol::MetadataEvent::Links { .. }
+                    | muxy_protocol::MetadataEvent::ScreenPrompts { .. },
                 ),
             ) => {}
             other => return Err(format!("expected resize reply, got {other:?}").into()),
@@ -722,7 +723,8 @@ fn resize_replaces_old_pending_rows_and_correlates_pipelined_requests() -> TestR
                 _,
                 Message::Metadata(
                     muxy_protocol::MetadataEvent::History { .. }
-                    | muxy_protocol::MetadataEvent::Links { .. },
+                    | muxy_protocol::MetadataEvent::Links { .. }
+                    | muxy_protocol::MetadataEvent::ScreenPrompts { .. },
                 ),
             ))) => {}
             Err(RecvTimeoutError::Timeout) => break,

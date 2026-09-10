@@ -16,3 +16,6 @@ pub use error::ServerError;
 pub use registry::{Registry, ServerEvent};
 pub use session::{AttachmentEvent, AttachmentId, SessionCommand, SessionHandle};
 pub use settings::ServerSettings;
+
+mod shell;
+pub use shell::ShellIntegration;

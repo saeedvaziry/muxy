@@ -242,7 +242,8 @@ fn metadata_crosses_the_connection_and_is_included_in_the_next_attachment() -> T
                     | MetadataEvent::History { .. }
                     | MetadataEvent::InputModes(_)
                     | MetadataEvent::CursorBlinking(_)
-                    | MetadataEvent::Links { .. } => {}
+                    | MetadataEvent::Links { .. }
+                    | MetadataEvent::ScreenPrompts { .. } => {}
                 }
             }
             ClientEvent::Frame { .. } => {}

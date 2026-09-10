@@ -64,6 +64,7 @@ fn fixture_path(message: &Message) -> PathBuf {
             body: ReplyBody::SearchPage(_),
             ..
         } => "search_reply",
+        Message::Metadata(MetadataEvent::ScreenPrompts { .. }) => "screen_prompts",
         Message::Metadata(MetadataEvent::Links { .. }) => "links_metadata",
         Message::Metadata(MetadataEvent::InputModes(_)) => "input_modes",
         Message::Metadata(MetadataEvent::CursorBlinking(_)) => "cursor_blinking",

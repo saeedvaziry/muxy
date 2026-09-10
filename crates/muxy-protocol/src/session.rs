@@ -18,6 +18,8 @@ pub enum ExitReason {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AttachSnapshot {
+    /// Prompt starts in history-then-screen row coordinates.
+    pub prompts: Vec<u16>,
     pub channel: ChannelId,
     pub size: Size,
     pub rows: Vec<Row>,
@@ -35,6 +37,8 @@ pub struct HistoryCursor(pub u64);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct HistoryPage {
+    /// Prompt starts in page-history-then-optional-screen row coordinates.
+    pub prompts: Vec<u16>,
     pub rows: Vec<Row>,
     pub next: Option<HistoryCursor>,
     pub total_rows: u64,
@@ -78,6 +82,7 @@ pub enum MetadataEvent {
     InputModes(InputModes),
     CursorBlinking(bool),
     Links { seq: u64, rows: Vec<LinkRow> },
+    ScreenPrompts { seq: u64, rows: Vec<u16> },
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

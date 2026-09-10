@@ -57,6 +57,9 @@ impl Message {
             Self::Reply { body, .. } => validate_reply(body),
             Self::Input(input) => validate_input(input),
             Self::Mouse(event) => validate_mouse(event),
+            Self::Metadata(MetadataEvent::ScreenPrompts { rows, .. }) => {
+                validate_prompts(rows, usize::from(MAX_ROWS))
+            }
             Self::Metadata(MetadataEvent::Links { rows, .. }) => validate_links(rows),
             Self::Metadata(MetadataEvent::Directory(path)) => validate_path(path),
             Self::FrameAck { .. }
@@ -164,6 +167,10 @@ fn validate_reply(body: &ReplyBody) -> Result<(), ErrorCode> {
                 snapshot.history_cursor,
                 snapshot.history_total,
                 200,
+            )?;
+            validate_prompts(
+                &snapshot.prompts,
+                snapshot.history.len() + usize::from(snapshot.size.rows),
             )
         }
         ReplyBody::HistoryPage(page) => {
@@ -171,7 +178,14 @@ fn validate_reply(body: &ReplyBody) -> Result<(), ErrorCode> {
             if let Some(screen) = &page.screen {
                 validate_saved_screen(screen)?;
             }
-            Ok(())
+            validate_prompts(
+                &page.prompts,
+                page.rows.len()
+                    + page
+                        .screen
+                        .as_ref()
+                        .map_or(0, |screen| usize::from(screen.size.rows)),
+            )
         }
         ReplyBody::SavedScreen(screen) => validate_saved_screen(screen),
         ReplyBody::SessionEnded
@@ -252,4 +266,15 @@ fn validate_links(rows: &[crate::LinkRow]) -> Result<(), ErrorCode> {
         return Err(ErrorCode::BadRequest);
     }
     Ok(())
+}
+
+fn validate_prompts(rows: &[u16], count: usize) -> Result<(), ErrorCode> {
+    if rows.len() > count
+        || rows.windows(2).any(|pair| pair[0] >= pair[1])
+        || rows.last().is_some_and(|row| usize::from(*row) >= count)
+    {
+        Err(ErrorCode::BadRequest)
+    } else {
+        Ok(())
+    }
 }

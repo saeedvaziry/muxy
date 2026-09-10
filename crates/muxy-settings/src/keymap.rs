@@ -50,12 +50,15 @@ pub enum Action {
     FindNext,
     FindPrevious,
     ScrollToBottom,
+    PreviousPrompt,
+    NextPrompt,
+    SelectCommandOutput,
     IncreaseFontSize,
     DecreaseFontSize,
 }
 
 impl Action {
-    pub const ALL: [Self; 42] = [
+    pub const ALL: [Self; 45] = [
         Self::NewHomeTab,
         Self::ToggleSidebar,
         Self::ToggleFullScreen,
@@ -96,6 +99,9 @@ impl Action {
         Self::FindNext,
         Self::FindPrevious,
         Self::ScrollToBottom,
+        Self::PreviousPrompt,
+        Self::NextPrompt,
+        Self::SelectCommandOutput,
         Self::IncreaseFontSize,
         Self::DecreaseFontSize,
     ];
@@ -142,6 +148,9 @@ impl Action {
             Self::Find => "find",
             Self::FindNext => "find_next",
             Self::FindPrevious => "find_previous",
+            Self::PreviousPrompt => "previous_prompt",
+            Self::NextPrompt => "next_prompt",
+            Self::SelectCommandOutput => "select_command_output",
             Self::ScrollToBottom => "scroll_to_bottom",
             Self::IncreaseFontSize => "increase_font_size",
             Self::DecreaseFontSize => "decrease_font_size",
@@ -203,6 +212,8 @@ impl Keymap {
             Action::HideApp,
             Action::HideOthers,
             Action::Minimize,
+            Action::PreviousPrompt,
+            Action::NextPrompt,
             Action::Find,
             Action::FindNext,
             Action::FindPrevious,

@@ -95,7 +95,11 @@ pub(crate) fn run(args: &Args) -> io::Result<()> {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("sessions");
-    let registry = Arc::new(Registry::persistent(settings, sender, &directory)?);
+    let hooks = muxy_server_core::ShellIntegration::install(
+        &directory.with_file_name("shell-integration"),
+    )?;
+    let registry =
+        Arc::new(Registry::persistent(settings, sender, &directory)?.with_shell_integration(hooks));
     let clients = Clients::default();
     let subscribers = Arc::clone(&clients);
     let sessions = Arc::clone(&registry);

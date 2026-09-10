@@ -203,7 +203,9 @@ A terminal pane offers what a standalone terminal such as Ghostty offers,
 including selection and clipboard, search, links, mouse reporting, input
 methods, and shell integration. Its title is the title set by the program
 running in it, otherwise the name of its foreground process, otherwise its
-current directory.
+current directory. Shell integration enables jumping between prompts and
+selecting a command’s output without selecting its prompt. It can be disabled
+in the server’s settings.
 
 The window has one active pane. That pane provides its tab's displayed title;
 focus is window state, not tab state, even when several tab layouts are visible.

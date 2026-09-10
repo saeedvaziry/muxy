@@ -140,6 +140,9 @@ pub enum ShortcutId {
     Zoom,
     OpenConfiguration,
     TerminalCloseFind,
+    PreviousPrompt,
+    NextPrompt,
+    SelectCommandOutput,
 }
 
 impl ShortcutId {
@@ -1012,5 +1015,29 @@ pub const ALL: &[Shortcut] = &[
         keys: &["escape"],
         contexts: &[Some("TerminalFindOpen && !TerminalSearchInput")],
         key_contexts: &[&[Some("TerminalFindOpen && !TerminalSearchInput")]],
+    },
+    Shortcut {
+        id: "previous_prompt",
+        keys: &["cmd-up", "cmd-shift-up"],
+        contexts: &[Some(WORKSPACE_CLIPBOARD_CONTEXT)],
+        key_contexts: &[
+            &[Some(WORKSPACE_CLIPBOARD_CONTEXT)],
+            &[Some(WORKSPACE_CLIPBOARD_CONTEXT)],
+        ],
+    },
+    Shortcut {
+        id: "next_prompt",
+        keys: &["cmd-down", "cmd-shift-down"],
+        contexts: &[Some(WORKSPACE_CLIPBOARD_CONTEXT)],
+        key_contexts: &[
+            &[Some(WORKSPACE_CLIPBOARD_CONTEXT)],
+            &[Some(WORKSPACE_CLIPBOARD_CONTEXT)],
+        ],
+    },
+    Shortcut {
+        id: "select_command_output",
+        keys: &[],
+        contexts: &[Some(WORKSPACE_CLIPBOARD_CONTEXT)],
+        key_contexts: &[],
     },
 ];

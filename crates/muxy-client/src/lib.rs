@@ -13,4 +13,4 @@ mod requests;
 pub use client::{Attachment, Client};
 pub use error::ClientError;
 pub use events::ClientEvent;
-pub use grid::{RunGrid, ScreenLinks};
+pub use grid::{RunGrid, ScreenLinks, ScreenPrompts};

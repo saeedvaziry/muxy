@@ -85,6 +85,8 @@ mod tests {
         Attachment {
             channel: ChannelId(1),
             grid: RunGrid {
+                prompts: std::collections::BTreeSet::default(),
+                prompt_state: muxy_client::ScreenPrompts::default(),
                 links: muxy_client::ScreenLinks::default(),
                 size: Size { cols: 20, rows: 3 },
                 rows: vec![vec![]; 3],

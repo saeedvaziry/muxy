@@ -378,6 +378,33 @@ mod tests {
     }
 
     #[test]
+    fn prompt_metadata_is_bounded_and_keeps_the_merged_frame_watermark() {
+        let outbox = Outbox::new(muxy_protocol::V1);
+        let channel = ChannelId(1);
+        outbox.lock().credit.insert(channel, false);
+        for seq in 1..1000 {
+            outbox.push_metadata(channel, MetadataEvent::ScreenPrompts { seq, rows: vec![1] });
+            outbox.push_frame(channel, frame(seq, 0));
+        }
+        assert_eq!(outbox.lock().metadata[&channel].len(), 1);
+        assert_eq!(
+            outbox.next(),
+            Some((
+                channel,
+                Message::Metadata(MetadataEvent::ScreenPrompts {
+                    seq: 999,
+                    rows: vec![1]
+                })
+            ))
+        );
+        outbox.lock().credit.insert(channel, true);
+        assert_eq!(
+            outbox.next(),
+            Some((channel, Message::Frame(frame(999, 0))))
+        );
+    }
+
+    #[test]
     fn history_counts_are_coalesced() {
         for version in muxy_protocol::SUPPORTED.iter().copied() {
             let outbox = Outbox::new(version);

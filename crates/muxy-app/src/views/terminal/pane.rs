@@ -398,8 +398,84 @@ impl TerminalPane {
         {
             self.reveal_match(cx);
         }
+        self.finish_command_selection(cx);
         self.validate_selection();
         cx.notify();
+    }
+
+    pub(crate) fn jump_prompt(&mut self, previous: bool, cx: &mut Context<Self>) {
+        let Some(grid) = self.displayed_grid() else {
+            return;
+        };
+        let anchor = self.visible_start(grid);
+        let operation = if previous {
+            super::scroll::PromptOperation::Previous
+        } else {
+            super::scroll::PromptOperation::Next
+        };
+        self.prompt_operation(operation, anchor, cx);
+    }
+
+    pub(crate) fn select_command_output(
+        &mut self,
+        position: Option<gpui::Point<gpui::Pixels>>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(grid) = self.displayed_grid() else {
+            return;
+        };
+        let anchor = position
+            .and_then(|position| self.point_at(position, false))
+            .and_then(|point| grid.history.len().checked_add_signed(point.row))
+            .unwrap_or(grid.history.len() + usize::from(grid.cursor.row));
+        self.prompt_operation(
+            super::scroll::PromptOperation::Select {
+                include_prompt: position.is_some(),
+            },
+            anchor,
+            cx,
+        );
+    }
+
+    fn prompt_operation(
+        &mut self,
+        operation: super::scroll::PromptOperation,
+        anchor: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if self.state != PaneState::Live {
+            return;
+        }
+        let Some(grid) = &self.grid else {
+            return;
+        };
+        let height = usize::from(self.viewport.unwrap_or(grid.size).rows);
+        if let Some(request) = self.scroll.prompt(operation, anchor, grid, height) {
+            self.request_history(request, cx);
+        }
+        self.finish_command_selection(cx);
+        self.validate_selection();
+        cx.notify();
+    }
+
+    fn finish_command_selection(&mut self, cx: &mut Context<Self>) {
+        if let Some((start, end)) = self.scroll.take_command_output()
+            && let Some(grid) = self.displayed_grid()
+        {
+            self.select(
+                Selection {
+                    anchor: Point {
+                        row: start,
+                        column: 0,
+                    },
+                    head: Point {
+                        row: end,
+                        column: grid.size.cols,
+                    },
+                },
+                cx,
+            );
+        }
     }
 
     pub(crate) fn scroll_to_bottom(&mut self, cx: &mut Context<Self>) {
@@ -412,6 +488,13 @@ impl TerminalPane {
 
     pub(crate) fn metadata(&mut self, event: MetadataEvent, cx: &mut Context<Self>) {
         match event {
+            MetadataEvent::ScreenPrompts { seq, rows } => {
+                if let Some(grid) = &mut self.grid {
+                    grid.screen_prompts(seq, rows);
+                }
+                cx.notify();
+                return;
+            }
             MetadataEvent::Links { seq, rows } => {
                 if let Some(grid) = &mut self.grid {
                     grid.links.replace(seq, rows);
@@ -723,6 +806,7 @@ impl TerminalPane {
     }
 
     fn select(&mut self, selection: Selection, cx: &mut Context<Self>) {
+        self.scroll.cancel_prompt();
         self.selection = (!selection.normalized().is_empty()).then_some(selection);
         self.selection_rows = self
             .displayed_grid()
@@ -1128,6 +1212,8 @@ mod tests {
 
     fn grid() -> RunGrid {
         RunGrid {
+            prompts: std::collections::BTreeSet::default(),
+            prompt_state: muxy_client::ScreenPrompts::default(),
             links: muxy_client::ScreenLinks::default(),
             size: Size { cols: 20, rows: 3 },
             rows: ["alpha beta", "second row", "prompt"]
@@ -1158,6 +1244,79 @@ mod tests {
             size(px(10.0), px(20.0)),
         ));
         pane.cell_height = 20.0;
+    }
+
+    #[gpui::test]
+    fn prompt_jumps_start_at_the_viewport_not_an_already_visible_prompt(cx: &mut TestAppContext) {
+        let pane = cx.new(|cx| {
+            TerminalPane::new(
+                Palette::new(true),
+                muxy_settings::TerminalSettings::default(),
+                cx,
+            )
+        });
+        pane.update(cx, |pane, cx| {
+            prepare_mouse(pane);
+            pane.grid.as_mut().unwrap().prompts = [0, 1, 3].into();
+            pane.jump_prompt(true, cx);
+            assert_eq!(pane.visible_start(pane.displayed_grid().unwrap()), 0);
+            pane.jump_prompt(false, cx);
+            assert!(pane.scroll.view.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn manual_selection_cancels_command_selection_waiting_for_history(cx: &mut TestAppContext) {
+        let pane = cx.new(|cx| {
+            TerminalPane::new(
+                Palette::new(true),
+                muxy_settings::TerminalSettings::default(),
+                cx,
+            )
+        });
+        pane.update(cx, |pane, cx| {
+            prepare_mouse(pane);
+            let grid = pane.grid.as_mut().unwrap();
+            grid.history_fresh = false;
+            let history = HistoryPage {
+                rows: grid.history.iter().cloned().collect(),
+                next: None,
+                total_rows: grid.history_total,
+                prompts: vec![0, 1, 3],
+                screen: Some(SavedScreen {
+                    size: grid.size,
+                    rows: grid
+                        .rows
+                        .iter()
+                        .enumerate()
+                        .map(|(index, runs)| Row {
+                            index: u16::try_from(index).unwrap(),
+                            runs: runs.clone(),
+                        })
+                        .collect(),
+                    cursor: grid.cursor,
+                    reason: None,
+                }),
+            };
+            let request = pane
+                .scroll
+                .prompt(
+                    super::super::scroll::PromptOperation::Select {
+                        include_prompt: false,
+                    },
+                    3,
+                    grid,
+                    3,
+                )
+                .unwrap();
+            let manual = Selection {
+                anchor: Point { row: 0, column: 0 },
+                head: Point { row: 0, column: 5 },
+            };
+            pane.select(manual, cx);
+            pane.receive_history(request, Ok(history), cx);
+            assert_eq!(pane.selection, Some(manual));
+        });
     }
 
     fn searchable_pane(window: &mut Window, cx: &mut Context<TerminalPane>) -> TerminalPane {
@@ -1227,6 +1386,7 @@ mod tests {
             pane.receive_history(
                 request,
                 Ok(HistoryPage {
+                    prompts: Vec::new(),
                     rows: vec![row(0, "new history")],
                     next: None,
                     total_rows: 1,

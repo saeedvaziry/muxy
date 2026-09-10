@@ -72,6 +72,7 @@ struct Owner {
     input_modes: InputModes,
     cursor_blinking: bool,
     links: Vec<muxy_protocol::LinkRow>,
+    prompts: Vec<u16>,
     frame_state: Option<(muxy_protocol::Cursor, muxy_protocol::Modes)>,
     next_tick: Option<Instant>,
     output_state: OutputState,
@@ -156,6 +157,7 @@ pub(crate) fn start(
                 input_modes: InputModes::default(),
                 cursor_blinking: true,
                 links: Vec::new(),
+                prompts: Vec::new(),
                 frame_state: None,
                 next_tick: None,
                 output_state: OutputState::Open,
@@ -373,6 +375,7 @@ impl Owner {
         if self.attachments.is_empty() {
             self.terminal.take_changed_rows()?;
             self.links = protocol_links(self.terminal.screen_links());
+            self.prompts = self.terminal.screen_prompts()?;
             self.frame_state = Some((
                 cursor(self.terminal.cursor()?),
                 modes(self.terminal.modes()?),
@@ -387,6 +390,7 @@ impl Owner {
             .screen
             .ok_or_else(|| io::Error::other("fresh history has no screen"))?;
         let snapshot = AttachSnapshot {
+            prompts: history.prompts,
             channel,
             size: self.size,
             rows: screen.rows,
@@ -435,8 +439,19 @@ impl Owner {
         let total = self.terminal.history_rows().map_err(terminal_error)?;
         let (range, next) = history_range(self.info.id, generation, before, max_rows, total)?;
         self.compress_pending = true;
-        let history = rows(self.terminal.history(range).map_err(terminal_error)?);
+        let (history, mut prompts) = self
+            .terminal
+            .history_with_prompts(range)
+            .map_err(terminal_error)?;
+        let history = rows(history);
         let screen = if before.0 == 0 {
+            prompts.extend(
+                self.terminal
+                    .screen_prompts()
+                    .map_err(terminal_error)?
+                    .into_iter()
+                    .filter_map(|row| u16::try_from(history.len() + usize::from(row)).ok()),
+            );
             Some(SavedScreen {
                 size: self.size,
                 rows: rows(self.terminal.screen().map_err(terminal_error)?),
@@ -451,6 +466,7 @@ impl Owner {
             generation,
             before,
             HistoryPage {
+                prompts,
                 rows: history,
                 next,
                 total_rows: total as u64,
@@ -580,10 +596,14 @@ impl Owner {
             modes: modes(self.terminal.modes()?),
         };
         let links = protocol_links(self.terminal.screen_links());
+        let prompts = self.terminal.screen_prompts()?;
+        let prompts_changed = self.prompts != prompts;
+        self.prompts = prompts;
         let links_changed = self.links != links;
         self.links = links;
         let state = (frame.cursor, frame.modes);
         if !links_changed
+            && !prompts_changed
             && !frame.reset
             && frame.rows.is_empty()
             && self.frame_state == Some(state)
@@ -596,6 +616,15 @@ impl Owner {
                 seq: attachment.seq,
                 ..frame.clone()
             };
+            if prompts_changed || frame.reset {
+                let _ =
+                    attachment
+                        .sink
+                        .send(AttachmentEvent::Metadata(MetadataEvent::ScreenPrompts {
+                            seq: frame.seq,
+                            rows: self.prompts.clone(),
+                        }));
+            }
             if links_changed || frame.reset {
                 let _ = attachment
                     .sink
@@ -721,6 +750,7 @@ mod tests {
             input_modes: InputModes::default(),
             cursor_blinking: true,
             links: Vec::new(),
+            prompts: Vec::new(),
             frame_state: None,
             next_tick: None,
             output_state: OutputState::Closed,
@@ -740,6 +770,44 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn prompt_marks_are_atomic_on_attach_and_history_reads_schedule_recompression()
+    -> Result<(), Fault> {
+        let mut owner = owner()?;
+        for _ in 0..10 {
+            owner.terminal.feed(
+                b"\x1b]133;A\x07$ \x1b]133;B\x07echo hi\r\n\x1b]133;C\x07hi\r\n\x1b]133;D;0\x07",
+            );
+        }
+        owner.terminal.feed(b"\x1b]133;A\x07$ \x1b]133;B\x07");
+        let (sink, events) = mpsc::channel();
+        owner.attach(AttachmentId(1), ChannelId(1), owner.size, sink)?;
+        let AttachmentEvent::Snapshot { snapshot, .. } = events.recv()? else {
+            return Err("expected snapshot".into());
+        };
+        assert_eq!(snapshot.prompts.len(), 11);
+        assert_eq!(
+            snapshot.prompts.last().copied().map(usize::from),
+            Some(snapshot.history.len() + 2)
+        );
+        owner.compress_pending = false;
+        let page = owner.history_page(HistoryCursor(0), 5)?;
+        assert!(owner.compress_pending);
+        assert_eq!(page.prompts, [1, 3, 5, 7]);
+        owner.tick()?;
+        assert!(!owner.compress_pending);
+        owner.terminal.feed(b"\x1b[2J\x1b[H");
+        owner.broadcast_frame(None)?;
+        let events: Vec<_> = events.try_iter().collect();
+        assert!(events.iter().any(|event| matches!(event, AttachmentEvent::Metadata(MetadataEvent::ScreenPrompts { seq: 1, rows }) if rows.is_empty())));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, AttachmentEvent::Frame(frame) if frame.seq == 1))
+        );
+        Ok(())
     }
 
     #[test]

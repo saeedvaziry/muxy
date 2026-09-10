@@ -137,6 +137,10 @@ fn saving_close_confirmation_preserves_invalid_files_and_in_memory_preferences()
 fn every_default_binding_round_trips_and_resolves_both_directions() -> Result {
     let keymap = Keymap::default();
     for action in Action::ALL {
+        if action == Action::SelectCommandOutput {
+            assert!(keymap.chord(action).is_none());
+            continue;
+        }
         let chord: KeyChord = keymap
             .chord(action)
             .ok_or("default is unbound")?
@@ -674,5 +678,39 @@ fn clipboard_and_opener_preferences_load_without_losing_unavailable_ids() -> Res
         settings
     );
     assert!(toml::from_str::<Settings>("[clipboard]\ncopy_on_select = 'yes'").is_err());
+    Ok(())
+}
+
+#[test]
+fn prompt_shortcuts_match_main_and_command_selection_can_be_bound() -> Result {
+    use muxy_core::shortcuts::{ShortcutSettings, WORKSPACE_CLIPBOARD_CONTEXT};
+    let defaults = Keymap::default();
+    assert_eq!(
+        defaults.keys("previous_prompt", Some(WORKSPACE_CLIPBOARD_CONTEXT)),
+        ["cmd-up", "cmd-shift-up"]
+    );
+    assert_eq!(
+        defaults.keys("next_prompt", Some(WORKSPACE_CLIPBOARD_CONTEXT)),
+        ["cmd-down", "cmd-shift-down"]
+    );
+    assert!(defaults.chord(Action::SelectCommandOutput).is_none());
+    let customized: Settings = toml::from_str(
+        "[keymap]\nprevious_prompt = 'ctrl-alt-p'\nselect_command_output = 'cmd-shift-a'",
+    )?;
+    assert_eq!(
+        customized
+            .keymap
+            .keys("previous_prompt", Some(WORKSPACE_CLIPBOARD_CONTEXT)),
+        ["ctrl-alt-p"]
+    );
+    assert_eq!(
+        customized
+            .keymap
+            .chord(Action::SelectCommandOutput)
+            .map(KeyChord::as_str),
+        Some("cmd-shift-a")
+    );
+    let claimed: Settings = toml::from_str("[keymap]\nnew_tab = 'cmd-up'")?;
+    assert!(claimed.keymap.chord(Action::PreviousPrompt).is_none());
     Ok(())
 }

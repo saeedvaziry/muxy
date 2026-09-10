@@ -31,6 +31,8 @@ pub(crate) struct Scroll {
     pub(crate) revision: u64,
     pending: Option<HistoryRequest>,
     restarted: bool,
+    prompt: Option<PromptTarget>,
+    command_output: Option<(isize, isize)>,
 }
 
 impl Scroll {
@@ -40,10 +42,10 @@ impl Scroll {
 
     pub(crate) fn refresh(&mut self, height: usize) -> Option<HistoryRequest> {
         let view = self.view.as_mut()?;
-        view.history.clear();
-        view.history_cursor = None;
-        view.history_fresh = false;
+        view.clear_history();
         self.pending = None;
+        self.prompt = None;
+        self.command_output = None;
         self.revision = self.revision.wrapping_add(1);
         self.set_offset(height);
         self.request(height)
@@ -57,6 +59,8 @@ impl Scroll {
         self.revision = self.revision.wrapping_add(1);
         self.pending = None;
         self.restarted = false;
+        self.prompt = None;
+        self.command_output = None;
     }
 
     pub(crate) fn reset(&mut self) {
@@ -64,6 +68,8 @@ impl Scroll {
     }
 
     pub(crate) fn resized(&mut self, height: usize) {
+        self.prompt = None;
+        self.command_output = None;
         self.pending = None;
         self.revision = self.revision.wrapping_add(1);
         self.elastic = 0.0;
@@ -85,6 +91,8 @@ impl Scroll {
         live: &RunGrid,
         height: usize,
     ) -> Option<HistoryRequest> {
+        self.prompt = None;
+        self.command_output = None;
         if !offset.is_finite() {
             return None;
         }
@@ -102,8 +110,7 @@ impl Scroll {
         if self.view.is_none() {
             let mut view = live.clone();
             if !view.history_fresh {
-                view.history.clear();
-                view.history_cursor = None;
+                view.clear_history();
             }
             self.view = Some(view);
         }
@@ -183,6 +190,10 @@ impl Scroll {
         match result {
             Ok(page) => {
                 if request.before.0 == 0 {
+                    if self.prompt.is_some() && !continues_snapshot(view, &page) {
+                        self.prompt = None;
+                        self.command_output = None;
+                    }
                     view.replace_history(page);
                     #[allow(clippy::cast_precision_loss)]
                     let maximum = (view.history_total as f64 + view.rows.len() as f64
@@ -195,6 +206,9 @@ impl Scroll {
                     }
                 } else {
                     view.fetch_older(page);
+                }
+                if self.prompt.is_some() {
+                    return self.continue_prompt(height);
                 }
                 self.set_offset(height);
                 if self.wanted == 0.0 {
@@ -209,19 +223,123 @@ impl Scroll {
                     && !self.restarted =>
             {
                 self.restarted = true;
-                view.history.clear();
-                view.history_cursor = None;
-                view.history_fresh = false;
+                self.prompt = None;
+                self.command_output = None;
+                view.clear_history();
                 self.offset = 0.0;
                 self.request(height)
             }
             Err(_) => {
+                self.prompt = None;
                 if request.before.0 == 0 {
                     self.bottom();
                 }
                 None
             }
         }
+    }
+
+    pub(crate) fn prompt(
+        &mut self,
+        operation: PromptOperation,
+        anchor: usize,
+        live: &RunGrid,
+        height: usize,
+    ) -> Option<HistoryRequest> {
+        let grid = self.view.as_ref().unwrap_or(live);
+        self.prompt = Some(PromptTarget {
+            operation,
+            from_bottom: grid.history.len() + grid.rows.len() - anchor,
+        });
+        self.command_output = None;
+        if self.view.is_none() {
+            let mut view = live.clone();
+            if !view.history_fresh {
+                view.clear_history();
+            }
+            self.view = Some(view);
+        }
+        self.continue_prompt(height)
+    }
+
+    pub(crate) fn cancel_prompt(&mut self) {
+        self.prompt = None;
+        self.command_output = None;
+    }
+
+    pub(crate) fn take_command_output(&mut self) -> Option<(isize, isize)> {
+        self.command_output.take()
+    }
+
+    #[allow(clippy::cast_precision_loss)]
+    fn continue_prompt(&mut self, height: usize) -> Option<HistoryRequest> {
+        let target = self.prompt?;
+        let view = self.view.as_ref()?;
+        if !view.history_fresh {
+            return self.prompt_page(HistoryCursor(0));
+        }
+        let count = view.history.len() + view.rows.len();
+        let anchor = count.checked_sub(target.from_bottom);
+        let row = anchor.and_then(|anchor| match target.operation {
+            PromptOperation::Previous
+            | PromptOperation::Select {
+                include_prompt: false,
+            } => view.prompts.range(..anchor).next_back().copied(),
+            PromptOperation::Next => view.prompts.range(anchor + 1..).next().copied(),
+            PromptOperation::Select {
+                include_prompt: true,
+            } => view.prompts.range(..=anchor).next_back().copied(),
+        });
+        if row.is_none()
+            && target.operation != PromptOperation::Next
+            && let Some(before) = view.history_cursor
+        {
+            return self.prompt_page(before);
+        }
+        self.prompt = None;
+        match (target.operation, row) {
+            (PromptOperation::Select { .. }, Some(row)) => {
+                let end = view
+                    .prompts
+                    .range(row + 1..)
+                    .next()
+                    .copied()
+                    .unwrap_or(view.history.len() + usize::from(view.cursor.row) + 1);
+                if end > row + 1 {
+                    let history = isize::try_from(view.history.len()).ok()?;
+                    self.command_output = Some((
+                        isize::try_from(row + 1).ok()? - history,
+                        isize::try_from(end - 1).ok()? - history,
+                    ));
+                }
+            }
+            (PromptOperation::Previous | PromptOperation::Next, Some(row)) => {
+                self.wanted = count.saturating_sub(height).saturating_sub(row) as f64;
+                self.offset = self.wanted;
+                self.elastic = 0.0;
+                self.revision = self.revision.wrapping_add(1);
+                if self.wanted == 0.0 {
+                    self.bottom();
+                }
+            }
+            (PromptOperation::Next, None) => self.bottom(),
+            (_, None) if self.offset == 0.0 => self.bottom(),
+            _ => {}
+        }
+        None
+    }
+
+    fn prompt_page(&mut self, before: HistoryCursor) -> Option<HistoryRequest> {
+        if self.pending.is_some() {
+            return None;
+        }
+        let request = HistoryRequest {
+            before,
+            max_rows: if before.0 == 0 { 200 } else { 500 },
+            ..HistoryRequest::recent()
+        };
+        self.pending = Some(request);
+        Some(request)
     }
 
     pub(crate) fn adopt_recent(&mut self, request: HistoryRequest) {
@@ -248,6 +366,20 @@ impl Scroll {
     }
 }
 
+fn continues_snapshot(view: &RunGrid, page: &HistoryPage) -> bool {
+    view.history_total == page.total_rows
+        && page.screen.as_ref().is_some_and(|screen| {
+            screen.size == view.size
+                && screen.cursor == view.cursor
+                && screen.rows.len() == view.rows.len()
+                && screen
+                    .rows
+                    .iter()
+                    .zip(&view.rows)
+                    .all(|(row, runs)| row.runs == *runs)
+        })
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::float_cmp)]
 mod tests {
@@ -271,6 +403,7 @@ mod tests {
 
     fn page(start: u16, end: u16, next: Option<HistoryCursor>) -> HistoryPage {
         HistoryPage {
+            prompts: Vec::new(),
             rows: (start..end)
                 .enumerate()
                 .map(|(index, value)| {
@@ -285,6 +418,7 @@ mod tests {
 
     fn grid() -> RunGrid {
         RunGrid::from_snapshot(&AttachSnapshot {
+            prompts: Vec::new(),
             channel: ChannelId(1),
             size: Size { cols: 10, rows: 5 },
             rows: page(100, 105, None).rows,
@@ -321,6 +455,128 @@ mod tests {
             code: ErrorCode::StaleHistoryCursor,
             message: "changed".into(),
         })
+    }
+
+    #[test]
+    fn prompt_navigation_loads_older_pages_then_returns_to_the_next_prompt() {
+        let mut live = grid();
+        live.prompts = [20, 24].into();
+        let mut scroll = Scroll::default();
+        scroll.prompt(PromptOperation::Previous, 24, &live, 5);
+        assert_eq!(scroll.offset, 0.0);
+        // From the live cursor, skipping the current prompt reaches the prior one.
+        live.prompts = [5, 24].into();
+        scroll.prompt(PromptOperation::Previous, 24, &live, 5);
+        assert_eq!(scroll.start(scroll.view.as_ref().unwrap(), 5), 5);
+        let request = scroll
+            .prompt(PromptOperation::Previous, 5, &live, 5)
+            .unwrap();
+        assert_eq!(request.before, HistoryCursor(42));
+        let mut older = page(60, 80, Some(HistoryCursor(7)));
+        older.prompts = vec![10];
+        assert!(scroll.receive(request, Ok(older), 5).is_none());
+        assert_eq!(scroll.start(scroll.view.as_ref().unwrap(), 5), 10);
+        scroll.prompt(PromptOperation::Next, 10, &live, 5);
+        assert_eq!(scroll.start(scroll.view.as_ref().unwrap(), 5), 25);
+        scroll.prompt(PromptOperation::Next, 25, &live, 5);
+        assert!(scroll.view.is_none());
+    }
+
+    #[test]
+    fn selecting_output_loads_the_prompt_before_the_clicked_row() {
+        let live = grid();
+        let mut scroll = Scroll::default();
+        let request = scroll
+            .prompt(
+                PromptOperation::Select {
+                    include_prompt: true,
+                },
+                2,
+                &live,
+                5,
+            )
+            .unwrap();
+        let mut older = page(60, 80, Some(HistoryCursor(7)));
+        older.prompts = vec![10];
+        scroll.receive(request, Ok(older), 5);
+        assert_eq!(scroll.take_command_output(), Some((-29, 4)));
+        assert!(scroll.take_command_output().is_none());
+    }
+
+    #[test]
+    fn prompt_jumps_cancel_on_stale_history_or_return_to_bottom() {
+        let live = grid();
+        let mut scroll = Scroll::default();
+        let request = scroll
+            .prompt(PromptOperation::Previous, 24, &live, 5)
+            .unwrap();
+        scroll.bottom();
+        scroll.receive(request, Ok(page(60, 80, None)), 5);
+        assert!(scroll.view.is_none());
+        let request = scroll
+            .prompt(PromptOperation::Previous, 24, &live, 5)
+            .unwrap();
+        let recent = scroll.receive(request, Err(stale()), 5).unwrap();
+        assert!(scroll.prompt.is_none());
+        let mut refreshed = page(90, 110, Some(HistoryCursor(7)));
+        refreshed.prompts = vec![19];
+        assert!(scroll.receive(recent, Ok(refreshed), 5).is_none());
+        assert!(scroll.view.is_none());
+        assert!(scroll.take_command_output().is_none());
+    }
+
+    #[test]
+    fn refreshing_a_changed_snapshot_does_not_retarget_a_prompt_action() {
+        for operation in [
+            PromptOperation::Previous,
+            PromptOperation::Select {
+                include_prompt: true,
+            },
+        ] {
+            let mut live = grid();
+            live.history_fresh = false;
+            let mut scroll = Scroll::default();
+            let request = scroll.prompt(operation, 22, &live, 5).unwrap();
+            let mut recent = page(90, 110, Some(HistoryCursor(7)));
+            recent.total_rows = 110;
+            recent.prompts = vec![19, 23];
+            recent.screen = Some(SavedScreen {
+                reason: None,
+                size: live.size,
+                rows: page(110, 115, None).rows,
+                cursor: live.cursor,
+            });
+            assert!(scroll.receive(request, Ok(recent), 5).is_none());
+            assert!(scroll.take_command_output().is_none());
+            assert!(scroll.view.is_none());
+        }
+    }
+
+    #[test]
+    fn future_prompt_metadata_does_not_change_a_frozen_selection() {
+        let mut live = grid();
+        live.prompts = [20, 24].into();
+        live.screen_prompts(3, vec![]);
+        let mut scroll = Scroll::default();
+        let request = scroll.prompt(
+            PromptOperation::Select {
+                include_prompt: true,
+            },
+            22,
+            &live,
+            5,
+        );
+        assert!(request.is_none());
+        assert_eq!(scroll.take_command_output(), Some((1, 3)));
+        live.apply(&ScreenFrame {
+            seq: 3,
+            reset: false,
+            rows: vec![],
+            cursor: live.cursor,
+            modes: live.modes,
+        });
+        assert!(live.prompts.is_empty());
+        assert_eq!(scroll.view.as_ref().unwrap().prompts, [20, 24].into());
     }
 
     #[test]
@@ -525,4 +781,17 @@ mod tests {
         assert_eq!(scroll.view.as_ref().unwrap(), &frozen);
         assert_eq!(frozen.size.cols, 10);
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PromptOperation {
+    Previous,
+    Next,
+    Select { include_prompt: bool },
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PromptTarget {
+    operation: PromptOperation,
+    from_bottom: usize,
 }

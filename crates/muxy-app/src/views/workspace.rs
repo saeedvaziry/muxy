@@ -50,7 +50,10 @@ actions!(
         ScrollToBottom,
         Find,
         FindNext,
-        FindPrevious
+        FindPrevious,
+        PreviousPrompt,
+        NextPrompt,
+        SelectCommandOutput
     ]
 );
 
@@ -105,6 +108,9 @@ fn workspace_bindings(keymap: &impl muxy_core::shortcuts::ShortcutSettings) -> V
     registry.register(ShortcutId::Find, &Find);
     registry.register(ShortcutId::FindNext, &FindNext);
     registry.register(ShortcutId::FindPrevious, &FindPrevious);
+    registry.register(ShortcutId::PreviousPrompt, &PreviousPrompt);
+    registry.register(ShortcutId::NextPrompt, &NextPrompt);
+    registry.register(ShortcutId::SelectCommandOutput, &SelectCommandOutput);
     registry.register(ShortcutId::ScrollToBottom, &ScrollToBottom);
     registry.register(ShortcutId::IncreaseFontSize, &IncreaseFontSize);
     registry.register(ShortcutId::DecreaseFontSize, &DecreaseFontSize);
@@ -142,6 +148,17 @@ impl AppModel {
                 .update(cx, |pane, cx| pane.step_find(previous, cx));
         }
     }
+    fn prompt_action(&mut self, previous: Option<bool>, cx: &mut Context<Self>) {
+        if self.overlay.is_some() || self.close_prompt.is_some() {
+            return;
+        }
+        if let Some(pane) = self.active_pane().and_then(|id| self.grids.get(&id)) {
+            pane.view.update(cx, |pane, cx| match previous {
+                Some(previous) => pane.jump_prompt(previous, cx),
+                None => pane.select_command_output(None, cx),
+            });
+        }
+    }
     fn zoom_terminal(&mut self, delta: f32, cx: &mut Context<Self>) {
         if let Some(pane) = self.active_pane().and_then(|pane| self.grids.get(&pane)) {
             pane.view.update(cx, |pane, cx| {
@@ -173,6 +190,13 @@ fn action_handlers(cx: &mut Context<AppModel>) -> gpui::Div {
         .on_action(cx.listener(|model, _: &Find, window, cx| model.find_terminal(window, cx)))
         .on_action(cx.listener(|model, _: &FindNext, _, cx| model.step_find(false, cx)))
         .on_action(cx.listener(|model, _: &FindPrevious, _, cx| model.step_find(true, cx)))
+        .on_action(
+            cx.listener(|model, _: &PreviousPrompt, _, cx| model.prompt_action(Some(true), cx)),
+        )
+        .on_action(cx.listener(|model, _: &NextPrompt, _, cx| model.prompt_action(Some(false), cx)))
+        .on_action(
+            cx.listener(|model, _: &SelectCommandOutput, _, cx| model.prompt_action(None, cx)),
+        )
         .key_context("WorkspaceTabs")
         .on_mouse_down(
             gpui::MouseButton::Navigate(gpui::NavigationDirection::Back),

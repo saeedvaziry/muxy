@@ -80,7 +80,14 @@ impl AppModel {
         if pane.displayed_grid().is_none() {
             all = all.disabled();
         }
-        let items = vec![copy, paste, all];
+        let mut output = Item::action(
+            "Select Command Output",
+            Command::TerminalSelectCommandOutput(id),
+        );
+        if pane.state != PaneState::Live {
+            output = output.disabled();
+        }
+        let items = vec![copy, paste, all, output];
         let model = cx.entity().downgrade();
         let window = self.window;
         cx.defer(move |cx| {

@@ -2242,6 +2242,8 @@ mod tests {
         muxy_client::Attachment {
             channel: muxy_protocol::ChannelId(1),
             grid: RunGrid {
+                prompts: std::collections::BTreeSet::default(),
+                prompt_state: muxy_client::ScreenPrompts::default(),
                 links: muxy_client::ScreenLinks::default(),
                 size: screen.size,
                 rows: screen.rows.into_iter().map(|row| row.runs).collect(),

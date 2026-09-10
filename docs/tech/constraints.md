@@ -64,3 +64,22 @@ cost time to learn.
 - The workloads, metrics, and hard-fail rules in
   [benchmarks.md](./benchmarks.md) are the regression baseline. Re-measure
   after any change to the engine, the frame shape, or the flow control.
+
+## Shell startup
+
+The server installs private hooks beside its socket. zsh and fish load them
+without editing user startup files. `shell_integration = false` in `server.toml`
+disables them for new sessions after a server restart. Shell-native integration,
+such as fish 4's prompt marks, is left alone.
+
+Bash keeps its normal login startup. To opt in, source the hook from the
+interactive startup file your Bash profile loads:
+
+```bash
+if [[ ${MUXY_SHELL_INTEGRATION:-0} == 1 ]]; then
+    source "$MUXY_SHELL_INTEGRATION_DIR/muxy.bash"
+fi
+```
+
+An existing Bash DEBUG trap is preserved; command-start and exit-status marks
+are omitted in that case, but prompt navigation still works.

@@ -93,7 +93,11 @@ Attach returns an atomic snapshot: size, screen, cursor, recent history
 with a cursor to older rows, title, and working directory. The initial
 hyperlink replacement follows the snapshot on the attachment channel.
 Title, directory, process, and bell events follow on that channel; bell is
-transient. The app derives the pane title as program title, then process
+transient. Live prompt starts accompany attach snapshots and history pages,
+indexed within their history rows followed by their screen rows. Screen prompt
+updates are full replacements tied to an attachment frame sequence, so marks
+never get ahead of the screen. Saved records do not yet retain prompt marks.
+The app derives the pane title as program title, then process
 name, then working directory, and the foreground process's shell flag
 drives close confirmation.
 

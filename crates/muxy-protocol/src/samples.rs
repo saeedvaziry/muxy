@@ -52,6 +52,7 @@ impl Message {
                 id: RequestId(2),
                 body: ReplyBody::Attached {
                     snapshot: Box::new(AttachSnapshot {
+                        prompts: vec![0],
                         channel,
                         size,
                         rows: rows.clone(),
@@ -154,6 +155,10 @@ fn history_samples(mut snapshot: AttachSnapshot) -> Vec<Message> {
     snapshot.history_total = 2;
     snapshot.history_cursor = Some(HistoryCursor(42));
     vec![
+        Message::Metadata(MetadataEvent::ScreenPrompts {
+            seq: 1,
+            rows: vec![0],
+        }),
         Message::Metadata(MetadataEvent::History { total_rows: 5000 }),
         Message::Request {
             id: RequestId(3),
@@ -174,6 +179,7 @@ fn history_samples(mut snapshot: AttachSnapshot) -> Vec<Message> {
         Message::Reply {
             id: RequestId(3),
             body: ReplyBody::HistoryPage(HistoryPage {
+                prompts: vec![0],
                 rows: snapshot.history.clone(),
                 next: None,
                 total_rows: 2,

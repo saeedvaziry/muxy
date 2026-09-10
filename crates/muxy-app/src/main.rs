@@ -46,9 +46,10 @@ use model::AppModel;
 use views::workspace::{
     AddProject, ClosePane, CloseTab, DecreaseFontSize, EndAllSessionsAndQuit, Find, FindNext,
     FindPrevious, FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp, HideApp, HideOthers,
-    IncreaseFontSize, Minimize, NewHomeTab, NewTab, NextProject, NextTab, OpenConfiguration,
-    PreviousProject, PreviousTab, Quit, SelectTab, ShowAll, SplitDown, SplitRight,
-    ToggleFullScreen, ToggleSidebar, ToggleThemePicker, ToggleZoomPane, Zoom, bind_keys,
+    IncreaseFontSize, Minimize, NewHomeTab, NewTab, NextProject, NextPrompt, NextTab,
+    OpenConfiguration, PreviousProject, PreviousPrompt, PreviousTab, Quit, SelectCommandOutput,
+    SelectTab, ShowAll, SplitDown, SplitRight, ToggleFullScreen, ToggleSidebar, ToggleThemePicker,
+    ToggleZoomPane, Zoom, bind_keys,
 };
 
 fn main() -> ExitCode {
@@ -190,6 +191,10 @@ fn menus() -> Vec<Menu> {
                 MenuItem::action("Find…", Find),
                 MenuItem::action("Find Next", FindNext),
                 MenuItem::action("Find Previous", FindPrevious),
+                MenuItem::separator(),
+                MenuItem::action("Previous Prompt", PreviousPrompt),
+                MenuItem::action("Next Prompt", NextPrompt),
+                MenuItem::action("Select Command Output", SelectCommandOutput),
             ],
         },
         Menu {

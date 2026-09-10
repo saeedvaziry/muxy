@@ -18,6 +18,7 @@ const TERMINAL_ENV: [(&str, &str); 3] = [
 
 pub(crate) fn spawn_shell(
     settings: &ServerSettings,
+    integration: Option<&crate::ShellIntegration>,
     directory: &Path,
     size: PtySize,
 ) -> Result<Pty, ServerError> {
@@ -27,13 +28,16 @@ pub(crate) fn spawn_shell(
             format!("{} is not a directory", directory.display()),
         ));
     }
-    let request = SpawnRequest {
+    let mut request = SpawnRequest {
         program: resolve_shell(settings),
         args: vec![OsString::from(LOGIN_FLAG)],
         cwd: directory.to_path_buf(),
         env: environment(),
         size,
     };
+    if let Some(integration) = integration {
+        integration.configure(&mut request, settings.shell_integration);
+    }
     Pty::spawn(request).map_err(ServerError::spawn_failed)
 }
 
