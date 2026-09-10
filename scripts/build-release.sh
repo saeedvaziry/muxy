@@ -83,13 +83,14 @@ plutil -lint "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 cp "$ROOT/LICENSE" "$APP/Contents/Resources/LICENSE"
 
+ICON_SOURCE="$ROOT/packaging/macos/AppIconAlpha.png"
 ICONSET="$STAGING/AppIcon.iconset"
 mkdir -p "$ICONSET"
 for SIZE in 16 32 128 256 512; do
-    sips -z "$SIZE" "$SIZE" "$ROOT/packaging/macos/AppIcon.png" \
+    sips -z "$SIZE" "$SIZE" "$ICON_SOURCE" \
         --out "$ICONSET/icon_${SIZE}x${SIZE}.png" >/dev/null
     DOUBLE=$((SIZE * 2))
-    sips -z "$DOUBLE" "$DOUBLE" "$ROOT/packaging/macos/AppIcon.png" \
+    sips -z "$DOUBLE" "$DOUBLE" "$ICON_SOURCE" \
         --out "$ICONSET/icon_${SIZE}x${SIZE}@2x.png" >/dev/null
 done
 iconutil --convert icns --output "$APP/Contents/Resources/AppIcon.icns" "$ICONSET"
