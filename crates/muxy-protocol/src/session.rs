@@ -77,6 +77,7 @@ pub enum MetadataEvent {
     History { total_rows: u64 },
     InputModes(InputModes),
     CursorBlinking(bool),
+    Links { seq: u64, rows: Vec<LinkRow> },
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -132,4 +133,17 @@ pub struct SavedScreen {
     pub rows: Vec<Row>,
     pub cursor: Cursor,
     pub reason: Option<ExitReason>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct LinkRow {
+    pub row: u16,
+    pub spans: Vec<LinkSpan>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct LinkSpan {
+    pub start: u16,
+    pub end: u16,
+    pub uri: String,
 }

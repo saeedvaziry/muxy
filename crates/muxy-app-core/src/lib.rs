@@ -7,6 +7,7 @@ mod error;
 mod home;
 mod ids;
 mod layout;
+pub mod opener;
 mod pane;
 mod project;
 pub mod restore;

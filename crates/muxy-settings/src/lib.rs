@@ -15,4 +15,7 @@ pub use chord::KeyChord;
 pub use error::{Error, Result};
 pub use ghostty::{CellHeight, TerminalSettings};
 pub use keymap::{Action, Keymap};
-pub use settings::{NewPaneDirectory, PaneSettings, ProjectSettings, Settings, WindowSettings};
+pub use settings::{
+    ClipboardSettings, NewPaneDirectory, OpenerSettings, PaneSettings, ProjectSettings, Settings,
+    WindowSettings,
+};

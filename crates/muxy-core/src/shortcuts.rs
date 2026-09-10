@@ -637,12 +637,16 @@ pub const ALL: &[Shortcut] = &[
             Some("BareInput"),
             Some("TerminalSearchInput"),
             Some("MultilineInput"),
+            Some("TerminalPane"),
+            Some("TerminalFindOpen"),
         ],
         key_contexts: &[&[
             Some("TextInput"),
             Some("BareInput"),
             Some("TerminalSearchInput"),
             Some("MultilineInput"),
+            Some("TerminalPane"),
+            Some("TerminalFindOpen"),
         ]],
     },
     Shortcut {

@@ -653,3 +653,26 @@ fn alias_overrides_only_displace_matching_contexts() -> Result {
     );
     Ok(())
 }
+
+#[test]
+fn clipboard_and_opener_preferences_load_without_losing_unavailable_ids() -> Result {
+    let defaults: Settings = toml::from_str("")?;
+    assert!(!defaults.clipboard.copy_on_select);
+    assert_eq!(defaults.openers.file, "system.editor");
+    assert_eq!(defaults.openers.url, "system.browser");
+    let settings: Settings = toml::from_str(
+        "[clipboard]\ncopy_on_select = true\n[openers]\nfile = 'extension:editor'\nurl = 'system.browser'\nproject_target = 'com.apple.finder'\n",
+    )?;
+    assert!(settings.clipboard.copy_on_select);
+    assert_eq!(settings.openers.file, "extension:editor");
+    assert_eq!(
+        settings.openers.project_target.as_deref(),
+        Some("com.apple.finder")
+    );
+    assert_eq!(
+        toml::from_str::<Settings>(&toml::to_string(&settings)?)?,
+        settings
+    );
+    assert!(toml::from_str::<Settings>("[clipboard]\ncopy_on_select = 'yes'").is_err());
+    Ok(())
+}

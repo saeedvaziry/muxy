@@ -145,7 +145,6 @@ fn prepare(
         return painting;
     };
     let height = view.viewport().map_or(grid.size.rows, |size| size.rows);
-    let scrolled = view.scroll.view.is_some();
     let start = view.visible_start(grid);
     let remainder = view.scroll.pixel_remainder(f32::from(cell.height));
     let origin = origin + point(px(0.0), px(remainder));
@@ -156,6 +155,7 @@ fn prepare(
         let row = u16::try_from(index).unwrap_or(MAX_ROWS);
         let position = origin + point(px(0.0), cell.height * f32::from(row));
         search_highlights(view, start + index, position, cell, &mut painting);
+        link_highlight(view, start + index, position, cell, palette, &mut painting);
         if let Some(bounds) = selection_bounds(view, start + index, position, cell) {
             painting.selections.push(bounds);
         }
@@ -220,7 +220,7 @@ fn prepare(
             painting.lines.push((position, line));
         }
     }
-    if !scrolled
+    if view.scroll.view.is_none()
         && view.focused
         && view.cursor_blink.visible
         && grid.cursor.visible
@@ -409,6 +409,41 @@ fn paint(painting: Painting, palette: Palette, window: &mut Window, cx: &mut App
         let mut color: Hsla = rgb(palette.cursor).into();
         color.a = 0.5;
         window.paint_quad(fill(cursor, color));
+    }
+}
+
+fn link_highlight(
+    view: &TerminalPane,
+    index: usize,
+    position: Point<Pixels>,
+    cell: gpui::Size<Pixels>,
+    palette: Palette,
+    painting: &mut Painting,
+) {
+    let Some(grid) = view.displayed_grid() else {
+        return;
+    };
+    if view.link_hover.target.is_some()
+        && let Some(link) = &view.link_hover.candidate
+        && isize::try_from(index)
+            .ok()
+            .and_then(|index| index.checked_sub(isize::try_from(grid.history.len()).ok()?))
+            == Some(link.row)
+    {
+        painting.decorations.push((
+            Bounds::new(
+                position
+                    + point(
+                        cell.width * f32::from(link.columns.start),
+                        cell.height - px(2.0),
+                    ),
+                size(
+                    cell.width * f32::from(link.columns.end - link.columns.start),
+                    px(1.0),
+                ),
+            ),
+            rgb(palette.foreground).into(),
+        ));
     }
 }
 

@@ -22,6 +22,8 @@ use super::{
 
 pub(crate) enum PaneEvent {
     Focused,
+    OpenLink(muxy_app_core::opener::Target),
+    ContextMenu(gpui::Point<gpui::Pixels>),
     Viewport(Size),
     Input(ChannelId, Vec<u8>),
     Mouse(ChannelId, MouseEvent),
@@ -57,6 +59,9 @@ pub(crate) enum PaneState {
 )]
 pub(crate) struct TerminalPane {
     pub(crate) grid: Option<RunGrid>,
+    pub(crate) copy_on_select: bool,
+    pub(crate) open_context: Option<muxy_app_core::opener::OpenContext>,
+    pub(crate) link_hover: super::links::Hover,
     pub(crate) scroll: Scroll,
     pub(crate) find: Option<find::Find>,
     pub(crate) find_refresh: Option<Task<()>>,
@@ -102,6 +107,9 @@ impl TerminalPane {
     ) -> Self {
         Self {
             grid: None,
+            copy_on_select: false,
+            open_context: None,
+            link_hover: super::links::Hover::default(),
             scroll: Scroll::default(),
             find: None,
             find_refresh: None,
@@ -404,6 +412,13 @@ impl TerminalPane {
 
     pub(crate) fn metadata(&mut self, event: MetadataEvent, cx: &mut Context<Self>) {
         match event {
+            MetadataEvent::Links { seq, rows } => {
+                if let Some(grid) = &mut self.grid {
+                    grid.links.replace(seq, rows);
+                }
+                cx.notify();
+                return;
+            }
             MetadataEvent::CursorBlinking(enabled) => {
                 if self.state == PaneState::Live && self.cursor_blink.enabled != enabled {
                     self.cursor_blink.enabled = enabled;
@@ -440,7 +455,10 @@ impl TerminalPane {
                 return;
             }
             MetadataEvent::Title(title) => self.title = title,
-            MetadataEvent::Directory(directory) => self.directory = directory,
+            MetadataEvent::Directory(directory) => {
+                self.directory = directory;
+                self.link_hover = super::links::Hover::default();
+            }
             MetadataEvent::ForegroundProcess { name, is_shell } => {
                 self.process = Some(ForegroundProcess { name, is_shell });
             }
@@ -527,6 +545,7 @@ impl TerminalPane {
     }
 
     fn reset_input(&mut self) {
+        self.link_hover = super::links::Hover::default();
         self.input_modes = InputModes::default();
         self.held_buttons.clear();
         self.last_mouse = None;
@@ -584,7 +603,7 @@ impl TerminalPane {
         }
     }
 
-    fn contains_mouse(&self, position: gpui::Point<gpui::Pixels>) -> bool {
+    pub(super) fn contains_mouse(&self, position: gpui::Point<gpui::Pixels>) -> bool {
         self.geometry
             .zip(self.grid.as_ref())
             .is_some_and(|((bounds, cell), grid)| {
@@ -712,7 +731,11 @@ impl TerminalPane {
     }
 
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    fn point_at(&self, position: gpui::Point<gpui::Pixels>, nearest: bool) -> Option<Point> {
+    pub(super) fn point_at(
+        &self,
+        position: gpui::Point<gpui::Pixels>,
+        nearest: bool,
+    ) -> Option<Point> {
         let (bounds, cell) = self.geometry?;
         let grid = self.displayed_grid()?;
         let x = (position.x - bounds.origin.x) / cell.width;
@@ -741,6 +764,15 @@ impl TerminalPane {
     ) {
         self.focus.focus(window);
         cx.emit(PaneEvent::Focused);
+        if event.button == MouseButton::Left && event.modifiers.platform {
+            self.hover_link(event.position, true, cx);
+            if let Some(target) = self.link_hover.target.clone() {
+                self.selecting = None;
+                cx.emit(PaneEvent::OpenLink(target));
+                cx.stop_propagation();
+                return;
+            }
+        }
         if self.reports_mouse(event.modifiers.shift) {
             self.clear_selection();
             self.scroll.bottom();
@@ -756,6 +788,12 @@ impl TerminalPane {
                 cx,
             );
             cx.notify();
+            return;
+        }
+        if event.button == MouseButton::Right {
+            self.selecting = None;
+            cx.emit(PaneEvent::ContextMenu(event.position));
+            cx.stop_propagation();
             return;
         }
         if event.button != MouseButton::Left {
@@ -784,6 +822,11 @@ impl TerminalPane {
         if !self.native_visible {
             return;
         }
+        self.hover_link(
+            event.position,
+            event.modifiers.platform && event.pressed_button.is_none(),
+            cx,
+        );
         if self.reports_mouse(event.modifiers.shift) && self.selecting.is_none() {
             if !self.held_buttons.is_empty()
                 || (event.pressed_button.is_none() && self.contains_mouse(event.position))
@@ -850,6 +893,7 @@ impl TerminalPane {
         if event.button != MouseButton::Left {
             return;
         }
+        let completed_selection = self.selecting.is_some();
         self.mouse_move(
             &gpui::MouseMoveEvent {
                 position: event.position,
@@ -859,31 +903,85 @@ impl TerminalPane {
             cx,
         );
         self.selecting = None;
+        if completed_selection && self.copy_on_select {
+            self.copy_selection(cx);
+        }
     }
 
-    fn copy(&mut self, _: &muxy_ui::text_input::Copy, _: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn copy_selection(&self, cx: &mut Context<Self>) {
         if let (Some(selection), Some(grid)) = (self.selection, self.displayed_grid()) {
             let text = selection.text(grid);
             if !text.is_empty() {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
             }
         }
+    }
+
+    pub(crate) fn select_all(&mut self, cx: &mut Context<Self>) {
+        let Some(grid) = self.displayed_grid() else {
+            return;
+        };
+        let Some(history) = isize::try_from(grid.history.len()).ok() else {
+            return;
+        };
+        let Some(last) = grid
+            .rows
+            .len()
+            .checked_sub(1)
+            .and_then(|row| isize::try_from(row).ok())
+        else {
+            return;
+        };
+        self.select(
+            Selection {
+                anchor: Point {
+                    row: -history,
+                    column: 0,
+                },
+                head: Point {
+                    row: last,
+                    column: grid.size.cols,
+                },
+            },
+            cx,
+        );
+    }
+
+    fn copy(&mut self, _: &muxy_ui::text_input::Copy, _: &mut Window, cx: &mut Context<Self>) {
+        self.copy_selection(cx);
         cx.stop_propagation();
     }
 
-    fn paste(&mut self, _: &muxy_ui::text_input::Paste, _: &mut Window, cx: &mut Context<Self>) {
-        if self.state == PaneState::Live
-            && let (Some(channel), Some(grid)) = (self.channel, &self.grid)
-            && let Some(text) = cx.read_from_clipboard().and_then(|item| item.text())
+    pub(crate) fn paste_clipboard(&mut self, cx: &mut Context<Self>) {
+        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text())
+            && let Some(grid) = &self.grid
         {
-            let bytes = clipboard::paste(&text, grid.modes);
-            if !bytes.is_empty() {
-                self.scroll_to_bottom(cx);
-                for chunk in bytes.chunks(muxy_protocol::MAX_INPUT) {
-                    cx.emit(PaneEvent::Input(channel, chunk.to_vec()));
-                }
+            self.send_paste(&clipboard::paste(&text, grid.modes), cx);
+        }
+    }
+
+    pub(crate) fn drop_paths(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
+        if let Some(grid) = &self.grid
+            && let Some(bytes) = clipboard::paths(paths, grid.modes)
+        {
+            self.send_paste(&bytes, cx);
+        }
+    }
+
+    fn send_paste(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
+        if self.state == PaneState::Live
+            && !bytes.is_empty()
+            && let Some(channel) = self.channel
+        {
+            self.scroll_to_bottom(cx);
+            for chunk in bytes.chunks(muxy_protocol::MAX_INPUT) {
+                cx.emit(PaneEvent::Input(channel, chunk.to_vec()));
             }
         }
+    }
+
+    fn paste(&mut self, _: &muxy_ui::text_input::Paste, _: &mut Window, cx: &mut Context<Self>) {
+        self.paste_clipboard(cx);
         cx.stop_propagation();
     }
 }
@@ -928,6 +1026,7 @@ impl Render for TerminalPane {
         }
         #[cfg(target_os = "macos")]
         self.setup_native_scroll(window, cx);
+        self.hover_link(window.mouse_position(), window.modifiers().platform, cx);
         let palette = self.palette;
         div()
             .id("terminal-pane")
@@ -959,6 +1058,33 @@ impl Render for TerminalPane {
                 pane.close_find(cx);
                 cx.stop_propagation();
             }))
+            .when(self.link_hover.target.is_some(), |pane| {
+                pane.cursor_pointer()
+            })
+            .on_modifiers_changed(cx.listener(
+                |pane, event: &gpui::ModifiersChangedEvent, window, cx| {
+                    pane.hover_link(window.mouse_position(), event.modifiers.platform, cx);
+                },
+            ))
+            .when(self.state == PaneState::Live, |pane| {
+                pane.drag_over::<gpui::ExternalPaths>(move |style, _, _, _| {
+                    style.border_1().border_color(gpui::rgb(palette.cursor))
+                })
+                .on_drop(cx.listener(
+                    |pane, paths: &gpui::ExternalPaths, window, cx| {
+                        pane.focus.focus(window);
+                        cx.emit(PaneEvent::Focused);
+                        pane.drop_paths(paths.paths(), cx);
+                        cx.stop_propagation();
+                    },
+                ))
+            })
+            .on_action(
+                cx.listener(|pane, _: &muxy_ui::text_input::SelectAll, _, cx| {
+                    pane.select_all(cx);
+                    cx.stop_propagation();
+                }),
+            )
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::paste))
             .on_scroll_wheel(cx.listener(|pane, event: &gpui::ScrollWheelEvent, _, cx| {
@@ -1002,6 +1128,7 @@ mod tests {
 
     fn grid() -> RunGrid {
         RunGrid {
+            links: muxy_client::ScreenLinks::default(),
             size: Size { cols: 20, rows: 3 },
             rows: ["alpha beta", "second row", "prompt"]
                 .into_iter()
@@ -1969,5 +2096,317 @@ mod tests {
         assert!(pane.read_with(cx, |pane, _| pane.find.is_some()));
         cx.simulate_keystrokes("ctrl-k");
         assert!(pane.read_with(cx, |pane, _| pane.find.is_none()));
+    }
+    #[gpui::test]
+    fn phase20_copy_on_select_runs_only_at_selection_completion(cx: &mut TestAppContext) {
+        let (pane, cx) = cx.add_window_view(|_, cx| {
+            TerminalPane::new(
+                Palette::new(true),
+                muxy_settings::TerminalSettings::default(),
+                cx,
+            )
+        });
+        for enabled in [false, true] {
+            cx.update(|window, cx| {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string("original".into()));
+                pane.update(cx, |pane, cx| {
+                    prepare_mouse(pane);
+                    pane.copy_on_select = enabled;
+                    pane.mouse_down(
+                        &gpui::MouseDownEvent {
+                            position: point(px(0.0), px(5.0)),
+                            click_count: 1,
+                            ..gpui::MouseDownEvent::default()
+                        },
+                        window,
+                        cx,
+                    );
+                    pane.mouse_move(
+                        &gpui::MouseMoveEvent {
+                            position: point(px(50.0), px(5.0)),
+                            pressed_button: Some(MouseButton::Left),
+                            ..gpui::MouseMoveEvent::default()
+                        },
+                        cx,
+                    );
+                    assert_eq!(
+                        cx.read_from_clipboard()
+                            .and_then(|item| item.text())
+                            .as_deref(),
+                        Some("original")
+                    );
+                    pane.mouse_up(
+                        &gpui::MouseUpEvent {
+                            position: point(px(50.0), px(5.0)),
+                            ..gpui::MouseUpEvent::default()
+                        },
+                        window,
+                        cx,
+                    );
+                    assert_eq!(
+                        cx.read_from_clipboard()
+                            .and_then(|item| item.text())
+                            .as_deref(),
+                        Some(if enabled { "alpha" } else { "original" })
+                    );
+                    pane.select_all(cx);
+                    pane.copy_selection(cx);
+                    assert_eq!(
+                        cx.read_from_clipboard()
+                            .and_then(|item| item.text())
+                            .as_deref(),
+                        Some("history row\nalpha beta\nsecond row\nprompt")
+                    );
+                });
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn phase20_command_click_opens_and_plain_click_selects_even_with_mouse_reporting(
+        cx: &mut TestAppContext,
+    ) {
+        let (pane, cx) = cx.add_window_view(|_, cx| {
+            TerminalPane::new(
+                Palette::new(true),
+                muxy_settings::TerminalSettings::default(),
+                cx,
+            )
+        });
+        let opened = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        cx.update(|window, cx| {
+            let links = opened.clone();
+            cx.subscribe(&pane, move |_, event, _| {
+                if let PaneEvent::OpenLink(text) = event {
+                    links.borrow_mut().push(text.clone());
+                }
+            })
+            .detach();
+            pane.update(cx, |pane, cx| {
+                prepare_mouse(pane);
+                pane.metadata(
+                    MetadataEvent::Links {
+                        seq: 0,
+                        rows: vec![muxy_protocol::LinkRow {
+                            row: 0,
+                            spans: vec![muxy_protocol::LinkSpan {
+                                start: 0,
+                                end: 5,
+                                uri: "https://example.com".into(),
+                            }],
+                        }],
+                    },
+                    cx,
+                );
+                let point = point(px(10.0), px(5.0));
+                pane.hover_link(point, true, cx);
+                assert!(pane.link_hover.target.is_some());
+                pane.hover_link(point, false, cx);
+                assert!(pane.link_hover.target.is_none());
+                pane.mouse_down(
+                    &gpui::MouseDownEvent {
+                        position: point,
+                        click_count: 2,
+                        ..gpui::MouseDownEvent::default()
+                    },
+                    window,
+                    cx,
+                );
+                assert!(pane.selection.is_some());
+                pane.input_modes.mouse_tracking = true;
+                pane.mouse_down(
+                    &gpui::MouseDownEvent {
+                        position: point,
+                        modifiers: gpui::Modifiers {
+                            platform: true,
+                            ..gpui::Modifiers::default()
+                        },
+                        ..gpui::MouseDownEvent::default()
+                    },
+                    window,
+                    cx,
+                );
+                assert!(pane.held_buttons.is_empty());
+            });
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            *opened.borrow(),
+            [muxy_app_core::opener::Target::Url(
+                "https://example.com".into()
+            )]
+        );
+    }
+
+    #[gpui::test]
+    fn phase20_file_drop_only_sends_to_live_sessions(cx: &mut TestAppContext) {
+        let pane = cx.new(|cx| {
+            TerminalPane::new(
+                Palette::new(true),
+                muxy_settings::TerminalSettings::default(),
+                cx,
+            )
+        });
+        let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        cx.update(|cx| {
+            let inputs = sent.clone();
+            cx.subscribe(&pane, move |_, event, _| {
+                if let PaneEvent::Input(_, bytes) = event {
+                    inputs.borrow_mut().extend_from_slice(bytes);
+                }
+            })
+            .detach();
+        });
+        pane.update(cx, |pane, cx| {
+            prepare_mouse(pane);
+            pane.grid.as_mut().unwrap().modes.bracketed_paste = true;
+            pane.drop_paths(&["/tmp/a b".into()], cx);
+            for state in [
+                PaneState::Disconnected,
+                PaneState::Connecting,
+                PaneState::Exited {
+                    reason: None,
+                    unavailable: false,
+                },
+            ] {
+                pane.set_state(state, cx);
+                pane.drop_paths(&["/tmp/ignored".into()], cx);
+            }
+        });
+        cx.run_until_parked();
+        assert_eq!(*sent.borrow(), b"\x1b[200~'/tmp/a b'\x1b[201~");
+    }
+
+    #[gpui::test]
+    fn command_click_on_rejected_candidates_preserves_selection_and_mouse_reporting(
+        cx: &mut TestAppContext,
+    ) {
+        let (pane, cx) = cx.add_window_view(|_, cx| {
+            TerminalPane::new(
+                Palette::new(true),
+                muxy_settings::TerminalSettings::default(),
+                cx,
+            )
+        });
+        let opened = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        cx.update(|window, cx| {
+            let links = opened.clone();
+            cx.subscribe(&pane, move |_, event, _| {
+                if let PaneEvent::OpenLink(target) = event {
+                    links.borrow_mut().push(target.clone());
+                }
+            })
+            .detach();
+            for uri in [
+                None,
+                Some("javascript:alert(1)"),
+                Some("file://remote/etc/hosts"),
+            ] {
+                for reporting in [false, true] {
+                    pane.update(cx, |pane, cx| {
+                        prepare_mouse(pane);
+                        let rows = uri
+                            .map(|uri| {
+                                vec![muxy_protocol::LinkRow {
+                                    row: 0,
+                                    spans: vec![muxy_protocol::LinkSpan {
+                                        start: 0,
+                                        end: 5,
+                                        uri: uri.into(),
+                                    }],
+                                }]
+                            })
+                            .unwrap_or_default();
+                        pane.metadata(MetadataEvent::Links { seq: 0, rows }, cx);
+                        pane.link_hover = super::super::links::Hover::default();
+                        pane.input_modes.mouse_tracking = reporting;
+                        pane.mouse_down(
+                            &gpui::MouseDownEvent {
+                                position: point(px(10.0), px(5.0)),
+                                click_count: 2,
+                                modifiers: gpui::Modifiers {
+                                    platform: true,
+                                    ..gpui::Modifiers::default()
+                                },
+                                ..gpui::MouseDownEvent::default()
+                            },
+                            window,
+                            cx,
+                        );
+                        assert!(pane.link_hover.target.is_none());
+                        assert_eq!(pane.selection.is_some(), !reporting);
+                        assert_eq!(!pane.held_buttons.is_empty(), reporting);
+                        pane.mouse_up(
+                            &gpui::MouseUpEvent {
+                                position: point(px(10.0), px(5.0)),
+                                modifiers: gpui::Modifiers {
+                                    platform: true,
+                                    ..gpui::Modifiers::default()
+                                },
+                                ..gpui::MouseUpEvent::default()
+                            },
+                            window,
+                            cx,
+                        );
+                    });
+                }
+            }
+        });
+        cx.run_until_parked();
+        assert!(opened.borrow().is_empty());
+    }
+
+    #[gpui::test]
+    fn command_click_uses_a_resolved_file_and_context_changes_discard_it(cx: &mut TestAppContext) {
+        use muxy_app_core::opener::{FileLocation, Target};
+        let (pane, cx) = cx.add_window_view(|_, cx| {
+            TerminalPane::new(
+                Palette::new(true),
+                muxy_settings::TerminalSettings::default(),
+                cx,
+            )
+        });
+        let target = Target::File(FileLocation {
+            path: "/project/alpha".into(),
+            line: None,
+            column: None,
+        });
+        let opened = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        cx.update(|window, cx| {
+            let links = opened.clone();
+            cx.subscribe(&pane, move |_, event, _| {
+                if let PaneEvent::OpenLink(target) = event {
+                    links.borrow_mut().push(target.clone());
+                }
+            })
+            .detach();
+            pane.update(cx, |pane, cx| {
+                prepare_mouse(pane);
+                let position = point(px(10.0), px(5.0));
+                pane.hover_link(position, true, cx);
+                pane.link_hover.target = Some(target.clone());
+                pane.mouse_down(
+                    &gpui::MouseDownEvent {
+                        position,
+                        modifiers: gpui::Modifiers {
+                            platform: true,
+                            ..gpui::Modifiers::default()
+                        },
+                        ..gpui::MouseDownEvent::default()
+                    },
+                    window,
+                    cx,
+                );
+                assert!(pane.selecting.is_none());
+                pane.metadata(MetadataEvent::Directory(ServerPath(b"/other".to_vec())), cx);
+                assert!(pane.link_hover.target.is_none());
+                pane.hover_link(position, true, cx);
+                pane.link_hover.target = Some(target.clone());
+                pane.set_state(PaneState::Disconnected, cx);
+                assert!(pane.link_hover.target.is_none());
+            });
+        });
+        cx.run_until_parked();
+        assert_eq!(*opened.borrow(), [target]);
     }
 }

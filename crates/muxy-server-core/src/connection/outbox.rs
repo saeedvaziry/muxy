@@ -569,4 +569,46 @@ mod tests {
         assert_eq!(outbox.next(), None);
         Ok(())
     }
+    #[test]
+    fn hyperlink_replacements_coalesce_before_frames_even_without_credit() {
+        let outbox = Outbox::new(muxy_protocol::V1);
+        let channel = ChannelId(1);
+        outbox.lock().credit.insert(channel, false);
+        for seq in 1..=3 {
+            outbox.push_metadata(
+                channel,
+                MetadataEvent::Links {
+                    seq,
+                    rows: vec![muxy_protocol::LinkRow {
+                        row: 0,
+                        spans: vec![muxy_protocol::LinkSpan {
+                            start: 0,
+                            end: 1,
+                            uri: format!("https://example.com/{seq}"),
+                        }],
+                    }],
+                },
+            );
+            outbox.push_frame(channel, frame(seq, 0));
+        }
+        outbox.push_metadata(
+            channel,
+            MetadataEvent::Links {
+                seq: 4,
+                rows: vec![],
+            },
+        );
+        assert_eq!(
+            outbox.next(),
+            Some((
+                channel,
+                Message::Metadata(MetadataEvent::Links {
+                    seq: 4,
+                    rows: vec![]
+                })
+            ))
+        );
+        assert!(outbox.lock().metadata.is_empty());
+        assert_eq!(outbox.lock().pending.len(), 1);
+    }
 }

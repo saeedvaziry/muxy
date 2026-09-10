@@ -19,12 +19,12 @@ pub use message::{ChannelKind, Message};
 pub use path::ServerPath;
 pub use screen::{Color, Cursor, Modes, Row, Run, ScreenFrame, Size, Style};
 pub use session::{
-    AttachSnapshot, ExitReason, ForegroundProcess, HistoryCursor, HistoryPage, InputModes,
-    MetadataEvent, Modifiers, MouseAction, MouseButton, MouseEvent, SavedScreen, ScrollDirection,
-    SearchMatch, SearchPage, SearchSource, SessionInfo,
+    AttachSnapshot, ExitReason, ForegroundProcess, HistoryCursor, HistoryPage, InputModes, LinkRow,
+    LinkSpan, MetadataEvent, Modifiers, MouseAction, MouseButton, MouseEvent, SavedScreen,
+    ScrollDirection, SearchMatch, SearchPage, SearchSource, SessionInfo,
 };
 pub use validate::{
-    MAX_COLS, MAX_INPUT, MAX_ROWS, validate_input, validate_path, validate_search, validate_size,
-    validate_versions,
+    MAX_COLS, MAX_INPUT, MAX_LINK_SPANS, MAX_LINK_URI, MAX_ROWS, validate_input, validate_path,
+    validate_search, validate_size, validate_versions,
 };
 pub use version::{SUPPORTED, V1, Version};

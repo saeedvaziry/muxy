@@ -14,6 +14,8 @@ pub struct Settings {
     pub keymap: Keymap,
     pub projects: ProjectSettings,
     pub panes: PaneSettings,
+    pub clipboard: ClipboardSettings,
+    pub openers: OpenerSettings,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -132,5 +134,29 @@ pub(crate) fn read_or_create(path: &Path, defaults: &str) -> Result<String> {
             fs::read_to_string(path).map_err(|error| Error::new(context(), error))
         }
         Err(error) => Err(Error::new(context(), error)),
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ClipboardSettings {
+    pub copy_on_select: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OpenerSettings {
+    pub url: String,
+    pub file: String,
+    pub project_target: Option<String>,
+}
+
+impl Default for OpenerSettings {
+    fn default() -> Self {
+        Self {
+            url: "system.browser".into(),
+            file: "system.editor".into(),
+            project_target: None,
+        }
     }
 }

@@ -5,6 +5,9 @@ use crate::{
 
 pub const MAX_COLS: u16 = 4096;
 pub const MAX_ROWS: u16 = 1024;
+pub const MAX_LINK_SPANS: usize = 1024;
+pub const MAX_LINK_URI: usize = 2048;
+
 pub const MAX_INPUT: usize = 1024 * 1024;
 
 pub fn validate_search(query: &str, max_results: u16) -> Result<(), ErrorCode> {
@@ -54,6 +57,7 @@ impl Message {
             Self::Reply { body, .. } => validate_reply(body),
             Self::Input(input) => validate_input(input),
             Self::Mouse(event) => validate_mouse(event),
+            Self::Metadata(MetadataEvent::Links { rows, .. }) => validate_links(rows),
             Self::Metadata(MetadataEvent::Directory(path)) => validate_path(path),
             Self::FrameAck { .. }
             | Self::VersionUnsupported
@@ -221,6 +225,28 @@ fn validate_saved_screen(screen: &SavedScreen) -> Result<(), ErrorCode> {
                 || row.runs.iter().any(|run| run.width == 0)
                 || row.runs.iter().map(|run| u64::from(run.width)).sum::<u64>()
                     > u64::from(screen.size.cols)
+        })
+    {
+        return Err(ErrorCode::BadRequest);
+    }
+    Ok(())
+}
+
+fn validate_links(rows: &[crate::LinkRow]) -> Result<(), ErrorCode> {
+    if rows.len() > usize::from(MAX_ROWS)
+        || rows.iter().map(|row| row.spans.len()).sum::<usize>() > MAX_LINK_SPANS
+        || rows.windows(2).any(|pair| pair[0].row >= pair[1].row)
+        || rows.iter().any(|row| {
+            row.row >= MAX_ROWS
+                || row.spans.is_empty()
+                || row.spans.windows(2).any(|pair| pair[0].end > pair[1].start)
+                || row.spans.iter().any(|span| {
+                    span.start >= span.end
+                        || span.end > MAX_COLS
+                        || span.uri.is_empty()
+                        || span.uri.len() > MAX_LINK_URI
+                        || span.uri.chars().any(char::is_control)
+                })
         })
     {
         return Err(ErrorCode::BadRequest);

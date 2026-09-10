@@ -1,6 +1,7 @@
 mod boot;
 mod model;
 mod navigation;
+mod opener;
 mod picker;
 mod server;
 mod theme;
@@ -25,6 +26,7 @@ mod views {
         pub(crate) mod element;
         pub(crate) mod find;
         pub(crate) mod input;
+        pub(crate) mod links;
         pub(crate) mod pane;
         pub(crate) mod scroll;
         pub(crate) mod selection;

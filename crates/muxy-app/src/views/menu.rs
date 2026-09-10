@@ -30,6 +30,9 @@ pub(crate) fn register_shortcuts(registry: &mut muxy_ui::shortcuts::Registry<'_>
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Command {
     Dismiss,
+    TerminalCopy(muxy_app_core::PaneId),
+    TerminalPaste(muxy_app_core::PaneId),
+    TerminalSelectAll(muxy_app_core::PaneId),
     CopyPath(muxy_app_core::ProjectId),
     RevealPath(muxy_app_core::ProjectId),
     EditProject(muxy_app_core::ProjectId, super::project_editor::Field),
@@ -136,6 +139,18 @@ impl AppModel {
         self.dismiss_overlay(cx);
         match command {
             Command::Dismiss => {}
+            Command::TerminalCopy(id)
+            | Command::TerminalPaste(id)
+            | Command::TerminalSelectAll(id) => {
+                if let Some(pane) = self.grids.get(&id) {
+                    pane.view.update(cx, |pane, cx| match command {
+                        Command::TerminalCopy(_) => pane.copy_selection(cx),
+                        Command::TerminalPaste(_) => pane.paste_clipboard(cx),
+                        Command::TerminalSelectAll(_) => pane.select_all(cx),
+                        _ => {}
+                    });
+                }
+            }
             Command::CopyPath(id) => {
                 if let Some(project) = self.state.project(id)
                     && project.status() == muxy_app_core::ProjectStatus::Available
@@ -221,6 +236,7 @@ pub(crate) fn render(
         panel = panel.child(
             div()
                 .id(SharedString::from(format!("menu-item-{index}")))
+                .debug_selector(move || format!("menu-item-{index}"))
                 .flex()
                 .items_center()
                 .gap(m.spacing2())

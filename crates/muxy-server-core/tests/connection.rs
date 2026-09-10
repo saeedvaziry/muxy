@@ -705,14 +705,26 @@ fn resize_replaces_old_pending_rows_and_correlates_pipelined_requests() -> TestR
                     body: ReplyBody::Resized,
                 },
             ) => replies.push(id.0),
-            (_, Message::Metadata(muxy_protocol::MetadataEvent::History { .. })) => {}
+            (
+                _,
+                Message::Metadata(
+                    muxy_protocol::MetadataEvent::History { .. }
+                    | muxy_protocol::MetadataEvent::Links { .. },
+                ),
+            ) => {}
             other => return Err(format!("expected resize reply, got {other:?}").into()),
         }
     }
     assert_eq!(replies, vec![91, 92]);
     loop {
         match client.incoming.recv_timeout(QUIET) {
-            Ok(Ok((_, Message::Metadata(muxy_protocol::MetadataEvent::History { .. })))) => {}
+            Ok(Ok((
+                _,
+                Message::Metadata(
+                    muxy_protocol::MetadataEvent::History { .. }
+                    | muxy_protocol::MetadataEvent::Links { .. },
+                ),
+            ))) => {}
             Err(RecvTimeoutError::Timeout) => break,
             other => return Err(format!("expected frames to remain blocked, got {other:?}").into()),
         }

@@ -70,8 +70,11 @@ Rows are style runs with server-supplied cell boundaries, so the client
 needs no width table. A row in a message replaces that row entirely. Frames
 carry only visible rows, are numbered from one per attachment, and are
 acked cumulatively. A resize carries the whole screen as one reset.
-Hyperlinks are session-scoped IDs, defined in every message that uses them;
-opening them is the app's job.
+OSC 8 hyperlinks are bounded URI spans sent as whole-screen metadata
+replacements, including an empty replacement when cleared. Their attachment
+frame sequence prevents activation ahead of the matching screen; zero refers
+to the attach snapshot. History carries no OSC 8 links. Detecting plain links
+and choosing browser, editor, or Finder openers are app policy.
 
 ## Terminal colors
 
@@ -87,9 +90,9 @@ colors on reconnect and theme changes.
 ## Attach and metadata
 
 Attach returns an atomic snapshot: size, screen, cursor, recent history
-with a cursor to older rows, hyperlinks, title, working directory,
-foreground process, and a metadata watermark. Title, directory, process,
-and bell events on the channel are sequenced after that watermark; bell is
+with a cursor to older rows, title, and working directory. The initial
+hyperlink replacement follows the snapshot on the attachment channel.
+Title, directory, process, and bell events follow on that channel; bell is
 transient. The app derives the pane title as program title, then process
 name, then working directory, and the foreground process's shell flag
 drives close confirmation.

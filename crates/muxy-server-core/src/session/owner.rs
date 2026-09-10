@@ -71,6 +71,7 @@ struct Owner {
     history_generation: u64,
     input_modes: InputModes,
     cursor_blinking: bool,
+    links: Vec<muxy_protocol::LinkRow>,
     frame_state: Option<(muxy_protocol::Cursor, muxy_protocol::Modes)>,
     next_tick: Option<Instant>,
     output_state: OutputState,
@@ -154,6 +155,7 @@ pub(crate) fn start(
                 history_generation: 0,
                 input_modes: InputModes::default(),
                 cursor_blinking: true,
+                links: Vec::new(),
                 frame_state: None,
                 next_tick: None,
                 output_state: OutputState::Open,
@@ -370,6 +372,7 @@ impl Owner {
         // clients receive pending changes before the new client's snapshot.
         if self.attachments.is_empty() {
             self.terminal.take_changed_rows()?;
+            self.links = protocol_links(self.terminal.screen_links());
             self.frame_state = Some((
                 cursor(self.terminal.cursor()?),
                 modes(self.terminal.modes()?),
@@ -408,6 +411,10 @@ impl Owner {
             let _ = sink.send(AttachmentEvent::Metadata(MetadataEvent::CursorBlinking(
                 self.cursor_blinking,
             )));
+            let _ = sink.send(AttachmentEvent::Metadata(MetadataEvent::Links {
+                seq: 0,
+                rows: self.links.clone(),
+            }));
             self.attachments.insert(id, Attachment { sink, seq: 1 });
         }
         Ok(())
@@ -572,8 +579,15 @@ impl Owner {
             cursor: cursor(self.terminal.cursor()?),
             modes: modes(self.terminal.modes()?),
         };
+        let links = protocol_links(self.terminal.screen_links());
+        let links_changed = self.links != links;
+        self.links = links;
         let state = (frame.cursor, frame.modes);
-        if !frame.reset && frame.rows.is_empty() && self.frame_state == Some(state) {
+        if !links_changed
+            && !frame.reset
+            && frame.rows.is_empty()
+            && self.frame_state == Some(state)
+        {
             return Ok(());
         }
         self.frame_state = Some(state);
@@ -582,6 +596,14 @@ impl Owner {
                 seq: attachment.seq,
                 ..frame.clone()
             };
+            if links_changed || frame.reset {
+                let _ = attachment
+                    .sink
+                    .send(AttachmentEvent::Metadata(MetadataEvent::Links {
+                        seq: frame.seq,
+                        rows: self.links.clone(),
+                    }));
+            }
             attachment.seq += 1;
             let event = if resized == Some(*id) {
                 AttachmentEvent::Resized(frame)
@@ -642,6 +664,23 @@ fn exit_reason(status: ExitStatus) -> ExitReason {
     }
 }
 
+fn protocol_links(rows: Vec<muxy_terminal::LinkRow>) -> Vec<muxy_protocol::LinkRow> {
+    rows.into_iter()
+        .map(|row| muxy_protocol::LinkRow {
+            row: row.row,
+            spans: row
+                .spans
+                .into_iter()
+                .map(|span| muxy_protocol::LinkSpan {
+                    start: span.start,
+                    end: span.end,
+                    uri: span.uri,
+                })
+                .collect(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -681,6 +720,7 @@ mod tests {
             history_generation: 0,
             input_modes: InputModes::default(),
             cursor_blinking: true,
+            links: Vec::new(),
             frame_state: None,
             next_tick: None,
             output_state: OutputState::Closed,

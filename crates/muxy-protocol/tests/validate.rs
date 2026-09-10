@@ -273,6 +273,7 @@ fn metadata_and_exit_reasons_without_limited_fields_are_valid() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn samples_cover_every_message_variant_once_and_use_the_right_channel() {
     let mut seen = BTreeSet::new();
     for message in Message::samples() {
@@ -335,6 +336,7 @@ fn samples_cover_every_message_variant_once_and_use_the_right_channel() {
             Message::Metadata(MetadataEvent::History { .. }) => {
                 ("HistoryMetadata", ChannelKind::Session)
             }
+            Message::Metadata(MetadataEvent::Links { .. }) => ("Links", ChannelKind::Session),
             Message::Metadata(MetadataEvent::InputModes(_)) => ("InputModes", ChannelKind::Session),
             Message::Metadata(MetadataEvent::CursorBlinking(_)) => {
                 ("CursorBlinking", ChannelKind::Session)
@@ -360,6 +362,7 @@ fn samples_cover_every_message_variant_once_and_use_the_right_channel() {
             "HistoryReply",
             "HistoryAttach",
             "HistoryMetadata",
+            "Links",
             "FrameAck",
             "HelloReply",
             "VersionUnsupported",

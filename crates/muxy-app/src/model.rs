@@ -1,3 +1,5 @@
+mod links;
+
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -901,10 +903,13 @@ impl AppModel {
             if let Some(font_size) = self.font_sizes.get(&id) {
                 terminal.font_size = *font_size;
             }
+            let open_context = self.opener_context(id);
             let snapshot = self.snapshots.remove(&id);
             let state = self.pane_state(id);
             let view = cx.new(|cx| {
                 let mut pane = TerminalPane::new(self.palette, terminal, cx);
+                pane.copy_on_select = self.settings.clipboard.copy_on_select;
+                pane.open_context = open_context;
                 pane.grid = snapshot;
                 pane.set_state(state, cx);
                 pane
@@ -914,6 +919,8 @@ impl AppModel {
                     let _ = model.state.set_pane_title(id, title.clone());
                     cx.notify();
                 }
+                PaneEvent::OpenLink(target) => model.open_terminal_link(id, target.clone(), cx),
+                PaneEvent::ContextMenu(position) => model.terminal_menu(id, *position, cx),
                 PaneEvent::Bell => cx.notify(),
                 PaneEvent::Focused => model.focus_pane(id, cx),
                 PaneEvent::History(request) => model.fetch_history(id, *request, cx),
@@ -1474,6 +1481,7 @@ mod tests {
     mod clipboard;
     mod colors;
     mod find;
+    mod links;
     mod mouse;
     mod projects;
     mod scrollback;
@@ -2234,6 +2242,7 @@ mod tests {
         muxy_client::Attachment {
             channel: muxy_protocol::ChannelId(1),
             grid: RunGrid {
+                links: muxy_client::ScreenLinks::default(),
                 size: screen.size,
                 rows: screen.rows.into_iter().map(|row| row.runs).collect(),
                 cursor: screen.cursor,

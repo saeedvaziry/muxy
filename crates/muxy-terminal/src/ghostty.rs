@@ -40,6 +40,7 @@ pub struct Terminal {
     pty_output: Rc<RefCell<Vec<u8>>>,
     events: Events,
     row_hashes: Vec<Option<u64>>,
+    links: Vec<crate::links::CachedRow>,
     text: String,
     redraw_all: bool,
     size: Size,
@@ -90,6 +91,7 @@ impl Terminal {
             pty_output,
             events,
             row_hashes: Vec::new(),
+            links: Vec::new(),
             text: String::new(),
             redraw_all: true,
             size,
@@ -301,14 +303,31 @@ impl Terminal {
         self.row_hashes
             .resize(usize::from(snapshot.rows().map_err(render)?), None);
         let mut iteration = self.rows.update(&snapshot).map_err(render)?;
+        self.links.resize_with(
+            usize::from(self.size.rows),
+            crate::links::CachedRow::default,
+        );
+        let mut link_count = 0;
         let mut changed = Vec::new();
         let mut index = 0;
         while let Some(row) = iteration.next() {
-            if all_dirty || row.dirty().map_err(render)? {
+            let dirty = all_dirty || row.dirty().map_err(render)?;
+            let links = &mut self.links[usize::from(index)];
+            let links_changed = links
+                .refresh(
+                    &self.engine,
+                    index,
+                    self.size.cols,
+                    dirty,
+                    crate::MAX_LINK_SPANS - link_count,
+                )
+                .map_err(render)?;
+            link_count += links.spans.len();
+            if dirty || links_changed {
                 let runs = row_runs(&mut self.cells, row, &mut self.text).map_err(render)?;
                 let hash = hash_runs(&runs);
                 let last = self.row_hashes.get_mut(usize::from(index));
-                if self.redraw_all || last.as_deref() != Some(&Some(hash)) {
+                if self.redraw_all || links_changed || last.as_deref() != Some(&Some(hash)) {
                     if let Some(last) = last {
                         *last = Some(hash);
                     }
@@ -321,6 +340,19 @@ impl Terminal {
         snapshot.set_dirty(Dirty::Clean).map_err(render)?;
         self.redraw_all = false;
         Ok(changed)
+    }
+
+    /// Full viewport hyperlinks from the most recent `take_changed_rows` call.
+    pub fn screen_links(&self) -> Vec<crate::LinkRow> {
+        self.links
+            .iter()
+            .zip(0_u16..)
+            .filter(|(row, _)| !row.spans.is_empty())
+            .map(|(row, index)| crate::LinkRow {
+                row: index,
+                spans: row.spans.clone(),
+            })
+            .collect()
     }
 
     pub fn take_pty_output(&mut self) -> Vec<u8> {

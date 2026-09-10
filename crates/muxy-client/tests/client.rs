@@ -7,6 +7,8 @@ use std::os::unix::fs::PermissionsExt;
 mod colors;
 #[path = "client/cursor.rs"]
 mod cursor;
+#[path = "client/links.rs"]
+mod links;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -239,7 +241,8 @@ fn metadata_crosses_the_connection_and_is_included_in_the_next_attachment() -> T
                     MetadataEvent::Bell
                     | MetadataEvent::History { .. }
                     | MetadataEvent::InputModes(_)
-                    | MetadataEvent::CursorBlinking(_) => {}
+                    | MetadataEvent::CursorBlinking(_)
+                    | MetadataEvent::Links { .. } => {}
                 }
             }
             ClientEvent::Frame { .. } => {}

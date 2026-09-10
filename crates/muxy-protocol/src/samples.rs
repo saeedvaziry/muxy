@@ -96,6 +96,17 @@ impl Message {
         samples.extend(search_samples(session, channel));
         samples.extend(color_samples());
         samples.push(Self::Metadata(MetadataEvent::CursorBlinking(true)));
+        samples.push(Self::Metadata(MetadataEvent::Links {
+            seq: 1,
+            rows: vec![crate::LinkRow {
+                row: 0,
+                spans: vec![crate::LinkSpan {
+                    start: 0,
+                    end: 4,
+                    uri: "https://example.com".into(),
+                }],
+            }],
+        }));
         samples
     }
 }

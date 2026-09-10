@@ -85,6 +85,7 @@ mod tests {
         Attachment {
             channel: ChannelId(1),
             grid: RunGrid {
+                links: muxy_client::ScreenLinks::default(),
                 size: Size { cols: 20, rows: 3 },
                 rows: vec![vec![]; 3],
                 cursor: Cursor {

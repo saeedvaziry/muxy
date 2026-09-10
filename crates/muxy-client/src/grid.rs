@@ -7,6 +7,7 @@ use muxy_protocol::{
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunGrid {
+    pub links: ScreenLinks,
     pub size: Size,
     pub rows: Vec<Vec<Run>>,
     pub cursor: Cursor,
@@ -20,6 +21,7 @@ pub struct RunGrid {
 impl RunGrid {
     pub fn from_snapshot(snapshot: &AttachSnapshot) -> Self {
         let mut grid = Self {
+            links: ScreenLinks::default(),
             size: snapshot.size,
             rows: blank_rows(snapshot.size.rows),
             cursor: snapshot.cursor,
@@ -34,6 +36,7 @@ impl RunGrid {
     }
 
     pub fn apply(&mut self, frame: &ScreenFrame) {
+        self.links.frame_seq = frame.seq;
         self.history_fresh = false;
         if frame.reset {
             let rows = usize::from(self.size.rows).max(
@@ -52,6 +55,7 @@ impl RunGrid {
     }
 
     pub fn resize(&mut self, size: Size) {
+        self.links.rows.clear();
         self.size = size;
         self.rows = blank_rows(size.rows);
         self.history.clear();
@@ -63,6 +67,7 @@ impl RunGrid {
         let mut cursor = screen.cursor;
         cursor.visible = false;
         Self {
+            links: ScreenLinks::default(),
             size: screen.size,
             rows: screen.rows.into_iter().map(|row| row.runs).collect(),
             cursor,
@@ -76,6 +81,7 @@ impl RunGrid {
 
     pub fn replace_history(&mut self, page: HistoryPage) {
         if let Some(screen) = page.screen {
+            self.links.rows.clear();
             self.size = screen.size;
             self.rows = screen.rows.into_iter().map(|row| row.runs).collect();
             self.cursor = screen.cursor;
@@ -128,6 +134,32 @@ impl RunGrid {
 
 fn blank_rows(count: u16) -> Vec<Vec<Run>> {
     vec![Vec::new(); usize::from(count)]
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ScreenLinks {
+    rows: Vec<muxy_protocol::LinkRow>,
+    seq: u64,
+    frame_seq: u64,
+}
+
+impl ScreenLinks {
+    pub fn replace(&mut self, seq: u64, rows: Vec<muxy_protocol::LinkRow>) {
+        if seq >= self.seq {
+            self.rows = rows;
+            self.seq = seq;
+        }
+    }
+
+    pub fn row(&self, row: u16, size: Size) -> &[muxy_protocol::LinkSpan] {
+        if row >= size.rows || self.seq > self.frame_seq {
+            return &[];
+        }
+        self.rows
+            .iter()
+            .find(|links| links.row == row)
+            .map_or(&[], |links| links.spans.as_slice())
+    }
 }
 
 #[cfg(test)]
@@ -299,5 +331,39 @@ mod tests {
         assert!(grid.history_fresh);
         grid.apply(&frame(1, false, vec![row(1, "new output")]));
         assert!(!grid.history_fresh);
+    }
+    #[test]
+    fn hyperlinks_wait_for_their_frame_and_ignore_out_of_range_rows() {
+        let mut grid = RunGrid::from_snapshot(&snapshot());
+        let links = vec![muxy_protocol::LinkRow {
+            row: 1,
+            spans: vec![muxy_protocol::LinkSpan {
+                start: 0,
+                end: 3,
+                uri: "https://example.com".into(),
+            }],
+        }];
+        grid.links.replace(2, links.clone());
+        grid.apply(&frame(1, false, vec![row(1, "old")]));
+        assert!(grid.links.row(1, grid.size).is_empty());
+        grid.apply(&frame(2, false, vec![row(1, "new")]));
+        assert_eq!(grid.links.row(1, grid.size), links[0].spans);
+        grid.links.replace(1, vec![]);
+        assert_eq!(grid.links.row(1, grid.size), links[0].spans);
+        grid.links.replace(
+            3,
+            vec![muxy_protocol::LinkRow {
+                row: 9,
+                ..links[0].clone()
+            }],
+        );
+        grid.apply(&frame(3, false, vec![]));
+        assert!(grid.links.row(9, grid.size).is_empty());
+        grid.links.replace(4, vec![]);
+        grid.apply(&frame(4, false, vec![]));
+        assert!(grid.links.row(1, grid.size).is_empty());
+        grid.links.replace(4, links);
+        grid.resize(Size { cols: 5, rows: 2 });
+        assert!(grid.links.row(1, grid.size).is_empty());
     }
 }
