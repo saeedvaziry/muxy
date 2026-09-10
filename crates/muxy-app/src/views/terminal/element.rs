@@ -1,3 +1,6 @@
+mod block;
+mod padding;
+
 use std::sync::Arc;
 
 use gpui::{
@@ -8,11 +11,11 @@ use muxy_protocol::{MAX_COLS, MAX_ROWS, Run, Size, Style};
 
 use super::{colors::Palette, pane::TerminalPane};
 
-const PADDING: f32 = 8.0;
-
+#[derive(Default)]
 struct Painting {
     lines: Vec<(Point<Pixels>, ShapedLine)>,
     backgrounds: Vec<(Bounds<Pixels>, Hsla)>,
+    blocks: Vec<(Bounds<Pixels>, Hsla)>,
     selections: Vec<Bounds<Pixels>>,
     matches: Vec<(Bounds<Pixels>, bool)>,
     decorations: Vec<(Bounds<Pixels>, Hsla)>,
@@ -50,7 +53,8 @@ pub(crate) fn terminal(view: Entity<TerminalPane>, palette: Palette) -> impl Int
                     .cell_height
                     .apply(natural_height, window.scale_factor())),
             );
-            let mut viewport = viewport_size(bounds.size, cell);
+            let frame = padding::Frame::new(bounds, cell);
+            let viewport = frame.viewport;
             #[cfg(target_os = "macos")]
             if let Some(native) = &view.read(cx).native_scroll {
                 let pane = view.read(cx);
@@ -66,37 +70,28 @@ pub(crate) fn terminal(view: Entity<TerminalPane>, palette: Palette) -> impl Int
                         + (palette.background & 0xff) * 114
                         < 128_000,
                 });
-                viewport = viewport_size(
-                    size(
-                        bounds.size.width - px(native.reserved_width()),
-                        bounds.size.height,
-                    ),
-                    cell,
-                );
             }
             let weak = view.downgrade();
             window.defer(cx, move |_, cx| {
                 let _ = weak.update(cx, |pane, cx| {
                     pane.cell_height = f32::from(cell.height);
                     pane.set_viewport(viewport, cx);
-                    pane.geometry = Some((
-                        Bounds::new(bounds.origin + point(px(PADDING), px(PADDING)), bounds.size),
-                        cell,
-                    ));
+                    pane.geometry = Some((frame.content, cell));
                 });
             });
             view.update(cx, |pane, cx| pane.sync_cursor_blink(window, cx));
-            prepare(
+            let painting = prepare(
                 view.read(cx),
-                bounds.origin + point(px(PADDING), px(PADDING)),
+                frame.content.origin,
                 cell,
                 palette,
                 &base_font,
                 font_size,
                 window,
-            )
+            );
+            (painting, frame, frame.backgrounds(view.read(cx), palette))
         },
-        move |bounds, painting, window, cx| {
+        move |bounds, (painting, frame, padding), window, cx| {
             let focus_border = mouse_view.read(cx).focus_border;
             let mouse_view = mouse_view.clone();
             window.on_mouse_event(move |event: &gpui::MouseMoveEvent, phase, _, cx| {
@@ -104,7 +99,15 @@ pub(crate) fn terminal(view: Entity<TerminalPane>, palette: Palette) -> impl Int
                     mouse_view.update(cx, |pane, cx| pane.mouse_move(event, cx));
                 }
             });
-            paint(painting, palette, window, cx);
+            for (bounds, color) in padding {
+                window.paint_quad(fill(bounds, color));
+            }
+            window.with_content_mask(
+                Some(gpui::ContentMask {
+                    bounds: frame.grid.intersect(&frame.content),
+                }),
+                |window| paint(painting, palette, window, cx),
+            );
             if let Some(color) = focus_border {
                 window.paint_quad(gpui::outline(bounds, color, gpui::BorderStyle::Solid));
             }
@@ -116,10 +119,10 @@ pub(crate) fn terminal(view: Entity<TerminalPane>, palette: Palette) -> impl Int
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn viewport_size(bounds: gpui::Size<Pixels>, cell: gpui::Size<Pixels>) -> Size {
     Size {
-        cols: ((bounds.width - px(PADDING * 2.0)) / cell.width)
+        cols: (bounds.width / cell.width)
             .floor()
             .clamp(1.0, f32::from(MAX_COLS)) as u16,
-        rows: ((bounds.height - px(PADDING * 2.0)) / cell.height)
+        rows: (bounds.height / cell.height)
             .floor()
             .clamp(1.0, f32::from(MAX_ROWS)) as u16,
     }
@@ -135,13 +138,8 @@ fn prepare(
     window: &mut Window,
 ) -> Painting {
     let mut painting = Painting {
-        lines: Vec::new(),
-        backgrounds: Vec::new(),
-        selections: Vec::new(),
-        matches: Vec::new(),
-        decorations: Vec::new(),
-        cursor: None,
         cell,
+        ..Painting::default()
     };
     let Some(grid) = view.displayed_grid() else {
         return painting;
@@ -172,7 +170,7 @@ fn prepare(
                 size(cell.width * f32::from(run.width), cell.height),
             );
             if background != palette.background {
-                push_background(&mut painting.backgrounds, bounds, rgb(background).into());
+                push_quad(&mut painting.backgrounds, bounds, rgb(background).into());
             }
             let mut foreground: Hsla = rgb(foreground).into();
             if run.style.faint {
@@ -196,15 +194,22 @@ fn prepare(
                     foreground,
                 ));
             }
-            append_run(
-                run,
-                column,
-                &mut text,
-                &mut styles,
-                &mut columns,
-                palette,
-                base_font,
-            );
+            if let Some(quads) = block::quads(&run.text, bounds, foreground, window.scale_factor())
+            {
+                for (bounds, color) in quads {
+                    push_quad(&mut painting.blocks, bounds, color);
+                }
+            } else {
+                append_run(
+                    run,
+                    column,
+                    &mut text,
+                    &mut styles,
+                    &mut columns,
+                    palette,
+                    base_font,
+                );
+            }
             column = column.saturating_add(run.width);
         }
         if !text.is_empty() {
@@ -358,7 +363,7 @@ fn text_run(len: usize, style: Style, palette: Palette, base_font: &gpui::Font) 
     }
 }
 
-fn push_background(quads: &mut Vec<(Bounds<Pixels>, Hsla)>, bounds: Bounds<Pixels>, color: Hsla) {
+fn push_quad(quads: &mut Vec<(Bounds<Pixels>, Hsla)>, bounds: Bounds<Pixels>, color: Hsla) {
     if let Some((previous, previous_color)) = quads.last_mut()
         && *previous_color == color
         && previous.origin.y == bounds.origin.y
@@ -386,6 +391,9 @@ fn paint(painting: Painting, palette: Palette, window: &mut Window, cx: &mut App
         window.paint_quad(fill(bounds, selection_color));
     }
     for (bounds, color) in painting.decorations {
+        window.paint_quad(fill(bounds, color));
+    }
+    for (bounds, color) in painting.blocks {
         window.paint_quad(fill(bounds, color));
     }
     for (origin, line) in painting.lines {
@@ -453,6 +461,155 @@ mod tests {
                     );
                     assert_eq!(painting.cursor.is_some(), expected);
                 }
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn block_elements_bypass_font_shaping(cx: &mut gpui::TestAppContext) {
+        let (pane, cx) = cx.add_window_view(|_, cx| {
+            TerminalPane::new(
+                Palette::new(true),
+                muxy_settings::TerminalSettings::default(),
+                cx,
+            )
+        });
+        cx.update(|window, cx| {
+            pane.update(cx, |pane, _| {
+                pane.grid = Some(muxy_client::RunGrid::from_saved(
+                    muxy_protocol::SavedScreen {
+                        size: Size { cols: 32, rows: 1 },
+                        rows: vec![muxy_protocol::Row {
+                            index: 0,
+                            runs: ('\u{2580}'..='\u{259f}')
+                                .map(|character| Run {
+                                    text: character.to_string(),
+                                    width: 1,
+                                    style: Style::default(),
+                                })
+                                .collect(),
+                        }],
+                        cursor: muxy_protocol::Cursor {
+                            row: 0,
+                            col: 0,
+                            visible: false,
+                        },
+                        reason: None,
+                    },
+                ));
+                let painting = prepare(
+                    pane,
+                    point(px(0.0), px(0.0)),
+                    size(px(8.0), px(16.0)),
+                    pane.palette,
+                    &font("Menlo"),
+                    px(12.0),
+                    window,
+                );
+                assert!(painting.lines.is_empty(), "blocks must not use font glyphs");
+                assert!(!painting.blocks.is_empty());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn block_graphics_preserve_grid_columns_and_styles(cx: &mut gpui::TestAppContext) {
+        let (pane, cx) = cx.add_window_view(|_, cx| {
+            TerminalPane::new(
+                Palette::new(true),
+                muxy_settings::TerminalSettings::default(),
+                cx,
+            )
+        });
+        cx.update(|window, cx| {
+            pane.update(cx, |pane, _| {
+                let plain = Style::default();
+                let styled = Style {
+                    fg: muxy_protocol::Color::Rgb(0x11, 0x22, 0x33),
+                    bg: muxy_protocol::Color::Rgb(0xaa, 0xbb, 0xcc),
+                    inverse: true,
+                    faint: true,
+                    bold: true,
+                    italic: true,
+                    underline: true,
+                    strikethrough: true,
+                };
+                pane.grid = Some(muxy_client::RunGrid::from_saved(
+                    muxy_protocol::SavedScreen {
+                        size: Size { cols: 9, rows: 1 },
+                        rows: vec![muxy_protocol::Row {
+                            index: 0,
+                            runs: [
+                                ("a", 1, plain),
+                                ("  ", 2, plain),
+                                ("█", 2, styled),
+                                ("█", 1, plain),
+                                ("█", 1, plain),
+                                ("░", 1, styled),
+                                ("x", 1, plain),
+                            ]
+                            .into_iter()
+                            .map(|(text, width, style)| Run {
+                                text: text.into(),
+                                width,
+                                style,
+                            })
+                            .collect(),
+                        }],
+                        cursor: muxy_protocol::Cursor {
+                            row: 0,
+                            col: 8,
+                            visible: true,
+                        },
+                        reason: None,
+                    },
+                ));
+                if let Some(grid) = &mut pane.grid {
+                    grid.cursor.visible = true;
+                }
+                let painting = prepare(
+                    pane,
+                    point(px(0.0), px(0.0)),
+                    size(px(8.0), px(16.0)),
+                    pane.palette,
+                    &font("Menlo"),
+                    px(12.0),
+                    window,
+                );
+                let mut color: Hsla = rgb(0xaa_bb_cc).into();
+                color.a = 0.5;
+                let mut shade = color;
+                shade.a *= 64.0 / 255.0;
+                let bounds =
+                    |x, width| Bounds::new(point(px(x), px(0.0)), size(px(width), px(16.0)));
+                assert_eq!(
+                    painting.blocks,
+                    vec![
+                        (bounds(24.0, 16.0), color),
+                        (bounds(40.0, 16.0), rgb(pane.palette.foreground).into()),
+                        (bounds(56.0, 8.0), shade),
+                    ]
+                );
+                assert_eq!(
+                    painting.backgrounds,
+                    vec![
+                        (bounds(24.0, 16.0), rgb(0x11_22_33).into()),
+                        (bounds(56.0, 8.0), rgb(0x11_22_33).into()),
+                    ]
+                );
+                assert_eq!(painting.decorations.len(), 4);
+                assert_eq!(painting.cursor, Some(bounds(64.0, 8.0)));
+                assert_eq!(painting.lines.len(), 1);
+                let line = &painting.lines[0].1;
+                assert_eq!(line.text.as_ref(), "a\u{200c}x\u{200c}");
+                let positions: Vec<_> = line
+                    .runs
+                    .iter()
+                    .flat_map(|run| &run.glyphs)
+                    .filter(|glyph| Some(glyph.index) == line.text.find('x'))
+                    .map(|glyph| glyph.position.x)
+                    .collect();
+                assert_eq!(positions, vec![px(64.0)]);
             });
         });
     }
@@ -539,7 +696,7 @@ mod tests {
         let mut quads = Vec::new();
         let color: Hsla = rgb(0xff_00_00).into();
         for x in [0.0, 10.0] {
-            push_background(
+            push_quad(
                 &mut quads,
                 Bounds::new(point(px(x), px(0.0)), size(px(10.0), px(15.0))),
                 color,
@@ -547,7 +704,7 @@ mod tests {
         }
         assert_eq!(quads.len(), 1);
         assert_eq!(quads[0].0.size.width, px(20.0));
-        push_background(
+        push_quad(
             &mut quads,
             Bounds::new(point(px(0.0), px(15.0)), size(px(10.0), px(15.0))),
             color,
@@ -555,12 +712,46 @@ mod tests {
         assert_eq!(quads.len(), 2);
     }
 
+    #[gpui::test]
+    #[allow(clippy::unwrap_used)]
+    fn terminal_geometry_matches_swift_padding_after_resize(cx: &mut gpui::TestAppContext) {
+        let (pane, cx) = cx.add_window_view(|_, cx| {
+            TerminalPane::new(
+                Palette::new(true),
+                muxy_settings::TerminalSettings::default(),
+                cx,
+            )
+        });
+        for dimensions in [size(px(816.0), px(416.0)), size(px(643.0), px(379.0))] {
+            cx.simulate_resize(dimensions);
+            cx.run_until_parked();
+            let pane_bounds = cx.debug_bounds("terminal-pane").unwrap();
+            pane.read_with(cx, |pane, _| {
+                let (bounds, cell) = pane.geometry.unwrap();
+                let viewport = pane.viewport().unwrap();
+                assert_eq!(bounds.origin, pane_bounds.origin + point(px(2.0), px(2.0)));
+                assert_eq!(bounds.size, pane_bounds.size - size(px(4.0), px(4.0)));
+                let unused_width = bounds.size.width - cell.width * f32::from(viewport.cols);
+                let unused_height = bounds.size.height - cell.height * f32::from(viewport.rows);
+                assert!(unused_width >= px(0.0) && unused_width < cell.width);
+                assert!(unused_height >= px(0.0) && unused_height < cell.height);
+            });
+        }
+    }
+
     #[test]
-    fn viewport_dimensions_are_positive_bounded_cell_counts() {
+    fn viewport_dimensions_use_full_bounds_and_whole_cells() {
         assert_eq!(
             viewport_size(size(px(816.0), px(416.0)), size(px(8.0), px(16.0))),
             Size {
-                cols: 100,
+                cols: 102,
+                rows: 26
+            }
+        );
+        assert_eq!(
+            viewport_size(size(px(815.5), px(415.5)), size(px(8.0), px(16.0))),
+            Size {
+                cols: 101,
                 rows: 25
             }
         );

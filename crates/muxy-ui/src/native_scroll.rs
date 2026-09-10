@@ -7,7 +7,7 @@ use objc2::{ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, define_cl
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
     NSApplication, NSBorderType, NSClipView, NSEventType, NSScrollElasticity, NSScrollView,
-    NSScroller, NSView,
+    NSScroller, NSScrollerStyle, NSView,
 };
 use objc2_foundation::{NSObjectProtocol, NSPoint, NSRect, NSSize};
 
@@ -132,6 +132,7 @@ impl NativeScrollView {
         view.setHasVerticalScroller(true);
         view.setHasHorizontalScroller(false);
         view.setAutohidesScrollers(true);
+        view.setScrollerStyle(NSScrollerStyle::Overlay);
         view.setHorizontalScrollElasticity(NSScrollElasticity::None);
         view.setVerticalScrollElasticity(NSScrollElasticity::Automatic);
         view.setUsesPredominantAxisScrolling(true);
